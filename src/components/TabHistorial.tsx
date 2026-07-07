@@ -55,12 +55,12 @@ export default function TabHistorial({
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-600 text-xs font-bold uppercase border-b border-slate-200">
-              <th className="py-3 px-4 w-[12%]">N° Reporte</th>
-              <th className="py-3 px-4 w-[18%]">Fecha</th>
+              <th className="py-3 px-4 w-[18%]">Código de Reporte</th>
+              <th className="py-3 px-4 w-[15%]">Fecha</th>
               <th className="py-3 px-4 w-[12%]">Grupo</th>
-              <th className="py-3 px-4 w-[25%]">Analista Responsable</th>
+              <th className="py-3 px-4 w-[22%]">Analista Responsable</th>
               <th className="py-3 px-4 w-[12%]">Turno</th>
-              <th className="py-3 px-4 w-[12%]">Estado</th>
+              <th className="py-3 px-4 w-[11%]">Estado</th>
               <th className="py-3 px-4 w-[10%] text-center">Acciones</th>
             </tr>
           </thead>
@@ -87,13 +87,18 @@ export default function TabHistorial({
                     key={rep.id} 
                     className={`hover:bg-slate-50/50 transition-all ${isActive ? 'bg-indigo-50/20' : ''}`}
                   >
-                    <td className="py-3.5 px-4 font-bold text-slate-900 flex items-center gap-1.5">
-                      #{rep.id}
-                      {isActive && (
-                        <span className="text-[9px] bg-indigo-100 text-indigo-800 font-black uppercase px-1 py-0.5 rounded-sm">
-                          Abierto
+                    <td className="py-3.5 px-4 font-bold text-slate-900">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-xs text-indigo-600 bg-indigo-50/50 px-2 py-0.5 rounded-md border border-indigo-100">
+                          {rep.fecha ? `${rep.fecha.replace(/-/g, '')}-T${rep.turno}-${rep.grupo}` : `TEMP-${rep.id}`}
                         </span>
-                      )}
+                        {isActive && (
+                          <span className="text-[9px] bg-emerald-100 text-emerald-800 font-black uppercase px-1 py-0.5 rounded-sm">
+                            Abierto
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-normal mt-0.5 block">ID Registro: #{rep.id}</span>
                     </td>
                     <td className="py-3.5 px-4 font-semibold text-slate-700">{rep.fecha}</td>
                     <td className="py-3.5 px-4 font-semibold text-slate-600">Grupo {rep.grupo}</td>

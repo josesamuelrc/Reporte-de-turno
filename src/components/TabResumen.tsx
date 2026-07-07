@@ -42,6 +42,7 @@ export default function TabResumen({ reporte }: TabResumenProps) {
 
     let text = `====================================\n`;
     text += `❄️  *REPORTE DE TURNO - POLAR*  ❄️\n`;
+    text += `📝 *Código:* ${cabecera.fecha ? `${cabecera.fecha.replace(/-/g, '')}-T${cabecera.turno}-${cabecera.grupo}` : 'TEMP'}\n`;
     text += `====================================\n\n`;
     
     text += `📅 *Fecha:* ${formattedDate}\n`;
@@ -259,8 +260,10 @@ export default function TabResumen({ reporte }: TabResumenProps) {
               SE
             </div>
             <div>
-              <h1 className="text-sm sm:text-base font-black text-slate-800 tracking-tight uppercase">REPORTE DE TURNO #{reporte.reporte_id || 'TEMP'}</h1>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Control de Calidad</p>
+              <h1 className="text-xs sm:text-sm font-black text-slate-800 tracking-tight uppercase">
+                CÓDIGO: <span className="font-mono text-indigo-600 font-extrabold">{cabecera.fecha ? `${cabecera.fecha.replace(/-/g, '')}-T${cabecera.turno}-${cabecera.grupo}` : 'TEMP'}</span>
+              </h1>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-0.5">Control de Calidad (Reg: #{reporte.reporte_id || 'TEMP'})</p>
             </div>
           </div>
           
