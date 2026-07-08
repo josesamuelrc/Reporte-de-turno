@@ -4,6 +4,7 @@ import { CheckSquare, Square, ClipboardList, Plus, Trash2, ArrowRightLeft, FileC
 import { Trazabilidad, Pendiente } from '../types';
 import { getTrazabilidadActiva, getPendientesActivos } from '../db';
 import ExpandableCell from './ExpandableCell';
+import { CATALOGO_PRODUCTOS_PBO } from './TabPBO';
 
 interface TabSeguimientoProps {
   trazabilidadesNuevas: Trazabilidad[];
@@ -85,7 +86,21 @@ export default function TabSeguimiento({
     if (!editable) return;
     onChangeTrazabilidadesNuevas([
       ...trazabilidadesNuevas,
-      { tipo: 'Hacia delante', codigo_sap: '', descripcion: '', orden: '', lote: '', defecto: '', ticket: '', estado: 'Pendiente', obs: '' }
+      {
+        tipo: 'Sin marcar',
+        codigo_sap: '',
+        descripcion: '',
+        orden: '',
+        lote: '',
+        defecto: '',
+        ticket: '',
+        tickets_inspeccionados: '',
+        tickets_retenidos: '',
+        estado: 'Pendiente',
+        obs: '',
+        hacia_adelante: false,
+        hacia_atras: false
+      }
     ]);
   };
 
@@ -99,7 +114,34 @@ export default function TabSeguimiento({
   const updateNuevaTrazCell = (index: number, key: keyof Trazabilidad, value: any) => {
     if (!editable) return;
     const updated = [...trazabilidadesNuevas];
-    updated[index] = { ...updated[index], [key]: value };
+    let row = { ...updated[index], [key]: value };
+
+    if (key === 'codigo_sap') {
+      const matched = CATALOGO_PRODUCTOS_PBO.find(p => p.codigo.toLowerCase() === value.toLowerCase().trim());
+      if (matched) {
+        row.descripcion = matched.nombre;
+      }
+    }
+
+    // Automatically determine state and tipo text
+    const forward = row.hacia_adelante ?? false;
+    const backward = row.hacia_atras ?? false;
+
+    if (forward && backward) {
+      row.estado = 'Finalizada';
+      row.tipo = 'Adelante y Atrás';
+    } else {
+      row.estado = 'Pendiente';
+      if (forward) {
+        row.tipo = 'Hacia delante';
+      } else if (backward) {
+        row.tipo = 'Hacia atrás';
+      } else {
+        row.tipo = 'Sin marcar';
+      }
+    }
+
+    updated[index] = row;
     onChangeTrazabilidadesNuevas(updated);
   };
 
@@ -130,7 +172,7 @@ export default function TabSeguimiento({
     <div className="space-y-8">
       {/* SECCION PENDIENTES DE TRABAJO (HERENCIA) */}
       <div className="w-full">
-        <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-5 flex flex-col h-full min-h-[300px]">
+        <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-5 flex flex-col h-full min-h-[300px]">
           <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-3">
             <ClipboardList className="w-5 h-5 text-indigo-600" />
             <div>
@@ -200,7 +242,7 @@ export default function TabSeguimiento({
       </div>
 
       {/* REGISTRAR NUEVA TRAZABILIDAD */}
-      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-6">
+      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2">
             <ArrowRightLeft className="w-5 h-5 text-indigo-600" />
@@ -221,40 +263,53 @@ export default function TabSeguimiento({
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-slate-200">
-          <table className="w-full text-left border-collapse min-w-[1000px]">
+          <table className="w-full text-left border-collapse min-w-[1200px]">
             <thead>
               <tr className="bg-slate-50 text-slate-600 text-xs font-bold uppercase border-b border-slate-200">
-                <th className="py-3 px-4 w-[15%]">Tipo de Trazabilidad</th>
+                <th className="py-3 px-2 w-[8%] text-center">Hacia Adelante</th>
+                <th className="py-3 px-2 w-[8%] text-center">Hacia Atrás</th>
                 <th className="py-3 px-4 w-[10%]">Código SAP</th>
-                <th className="py-3 px-4 w-[25%]">Descripción</th>
+                <th className="py-3 px-4 w-[18%]">Descripción</th>
                 <th className="py-3 px-4 w-[10%]">Orden</th>
                 <th className="py-3 px-4 w-[10%]">Lote</th>
-                <th className="py-3 px-4 w-[12%]">Defecto/Causa</th>
-                <th className="py-3 px-4 w-[8%]">Ticket</th>
-                <th className="py-3 px-4 w-[15%]">OBS/Comentarios</th>
+                <th className="py-3 px-4 w-[10%]">Defecto/Causa</th>
+                <th className="py-3 px-4 w-[10%]">Tickets Inspeccionados</th>
+                <th className="py-3 px-4 w-[10%]">Tickets Retenidos</th>
+                <th className="py-3 px-4 w-[12%]">OBS/Comentarios</th>
                 {editable && <th className="py-3 px-4 w-[4%] text-center"></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
               {trazabilidadesNuevas.length === 0 ? (
                 <tr>
-                  <td colSpan={editable ? 9 : 8} className="py-8 text-center text-slate-400 font-medium bg-slate-50/40">
+                  <td colSpan={editable ? 11 : 10} className="py-8 text-center text-slate-400 font-medium bg-slate-50/40">
                     No se han registrado nuevas solicitudes de trazabilidad en este turno.
                   </td>
                 </tr>
               ) : (
                 trazabilidadesNuevas.map((t, idx) => (
                   <tr key={idx} className="hover:bg-slate-50/40 transition-all">
-                    <td className="py-1 px-1.5">
-                      <select
-                        disabled={!editable}
-                        value={t.tipo}
-                        onChange={(e) => updateNuevaTrazCell(idx, 'tipo', e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded p-1 text-xs outline-hidden"
-                      >
-                        <option value="Hacia delante">Hacia delante (Forward)</option>
-                        <option value="Hacia atras">Hacia atras (Backwards)</option>
-                      </select>
+                    <td className="py-1 px-1.5 text-center">
+                      <label className="inline-flex items-center justify-center cursor-pointer p-1">
+                        <input
+                          type="checkbox"
+                          disabled={!editable}
+                          checked={t.hacia_adelante || false}
+                          onChange={(e) => updateNuevaTrazCell(idx, 'hacia_adelante', e.target.checked)}
+                          className="w-4 h-4 rounded-sm border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                        />
+                      </label>
+                    </td>
+                    <td className="py-1 px-1.5 text-center">
+                      <label className="inline-flex items-center justify-center cursor-pointer p-1">
+                        <input
+                          type="checkbox"
+                          disabled={!editable}
+                          checked={t.hacia_atras || false}
+                          onChange={(e) => updateNuevaTrazCell(idx, 'hacia_atras', e.target.checked)}
+                          className="w-4 h-4 rounded-sm border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                        />
+                      </label>
                     </td>
                     <td className="py-1 px-1.5">
                       <ExpandableCell
@@ -304,10 +359,19 @@ export default function TabSeguimiento({
                     <td className="py-1 px-1.5">
                       <ExpandableCell
                         disabled={!editable}
-                        value={t.ticket}
-                        onChange={(val) => updateNuevaTrazCell(idx, 'ticket', val)}
-                        placeholder="Ticket"
-                        label="Número de Ticket"
+                        value={t.tickets_inspeccionados || ''}
+                        onChange={(val) => updateNuevaTrazCell(idx, 'tickets_inspeccionados', val)}
+                        placeholder="Inspeccionados"
+                        label="Tickets Inspeccionados"
+                      />
+                    </td>
+                    <td className="py-1 px-1.5">
+                      <ExpandableCell
+                        disabled={!editable}
+                        value={t.tickets_retenidos || ''}
+                        onChange={(val) => updateNuevaTrazCell(idx, 'tickets_retenidos', val)}
+                        placeholder="Retenidos"
+                        label="Tickets Retenidos"
                       />
                     </td>
                     <td className="py-1 px-1.5">
@@ -338,7 +402,7 @@ export default function TabSeguimiento({
       </div>
 
       {/* REGISTRAR NUEVO PENDIENTE */}
-      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-6">
+      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2">
             <FileCheck className="w-5 h-5 text-indigo-600" />

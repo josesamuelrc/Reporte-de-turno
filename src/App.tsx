@@ -10,7 +10,10 @@ import {
   AlertOctagon, 
   AlertTriangle,
   ClipboardCheck,
-  Sparkles
+  Sparkles,
+  Lock,
+  Unlock,
+  ShieldAlert
 } from 'lucide-react';
 import { 
   getAnalistas, 
@@ -40,11 +43,40 @@ import TabRociadoras from './components/TabRociadoras';
 import TabResumen from './components/TabResumen';
 import TabHistorial from './components/TabHistorial';
 import TabConfiguracion from './components/TabConfiguracion';
+import TabPBO from './components/TabPBO';
 
 export default function App() {
-  // Navigation State
+  // Navigation & Security State
+  const [activeModule, setActiveModule] = useState<'inspeccion' | 'pbo'>('inspeccion');
+  const [currentRole, setCurrentRole] = useState<'public' | 'calidad' | 'logistica'>(() => {
+    return (localStorage.getItem('pbo_user_role') as any) || 'public';
+  });
+  const [pinInput, setPinInput] = useState('');
+  const [loginError, setLoginError] = useState(false);
+
   const [activeTab, setActiveTab] = useState<'general' | 'calidad' | 'seguimiento' | 'rociadoras' | 'resumen' | 'historial' | 'configuracion'>('general');
   const [dbConnected, setDbConnected] = useState(false);
+
+  const handleAuthenticate = (pin: string): boolean => {
+    if (pin === '501878') {
+      setCurrentRole('calidad');
+      localStorage.setItem('pbo_user_role', 'calidad');
+      setLoginError(false);
+      return true;
+    } else if (pin === '501877') {
+      setCurrentRole('logistica');
+      localStorage.setItem('pbo_user_role', 'logistica');
+      setLoginError(false);
+      return true;
+    }
+    return false;
+  };
+
+  const handleLogout = () => {
+    setCurrentRole('public');
+    localStorage.setItem('pbo_user_role', 'public');
+    setActiveModule('pbo');
+  };
 
   // Analysts State
   const [analistas, setAnalistas] = useState<string[]>([]);
@@ -61,6 +93,9 @@ export default function App() {
     hum_cumple: true,
     caida_tension: '',
     observaciones_ambiente: '',
+    equipos_medicion: '',
+    start_quality_cumple: true,
+    observacion_start_quality: '',
     estado: 'Borrador'
   });
   const [productos, setProductos] = useState<ProductoTurno[]>([]);
@@ -287,7 +322,7 @@ export default function App() {
       temp_cumple: true,
       hum_cumple: true,
       caida_tension: 'Sin caídas de tensión',
-      observaciones_ambiente: 'Condiciones ambientales controladas óptimas en sala de envasado.',
+      observaciones_ambiente: '',
       estado: 'Borrador'
     });
 
@@ -412,268 +447,382 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-800 font-sans">
       
       {/* TOP STATUS BAR (Hidden when printing) */}
-      <div className="bg-slate-900 text-slate-300 py-1.5 px-4 text-[10px] sm:text-xs font-semibold border-b border-slate-800 print:hidden flex items-center justify-between gap-4 shrink-0">
-        <span className="text-[9px] text-slate-400 uppercase font-bold tracking-widest">Sistema de Inspección de Turno v1.2.5</span>
-        {dbConnected ? (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+      <div className="bg-slate-900 text-slate-300 py-1.5 px-4 text-[10px] sm:text-xs font-semibold border-b border-slate-800 print:hidden flex flex-col sm:flex-row items-center sm:justify-between gap-2 sm:gap-4 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
+          <span className="text-[9px] text-slate-400 uppercase font-bold tracking-widest hidden md:inline">Sistema de Inspección de Turno v1.2.5</span>
+          <span className="text-slate-700 hidden md:inline">|</span>
+          <span className="text-[11px] font-bold text-slate-300">
+            Sesión: {currentRole === 'calidad' ? (
+              <span className="text-indigo-400 font-extrabold uppercase bg-indigo-500/10 px-2 py-0.5 rounded">Calidad</span>
+            ) : currentRole === 'logistica' ? (
+              <span className="text-orange-400 font-extrabold uppercase bg-orange-500/10 px-2 py-0.5 rounded">Logística</span>
+            ) : (
+              <span className="text-slate-400 font-extrabold uppercase bg-slate-800 px-2 py-0.5 rounded">Consulta Pública</span>
+            )}
+          </span>
+          {currentRole !== 'public' && (
+            <button
+              onClick={handleLogout}
+              className="text-[10px] font-extrabold text-rose-400 hover:text-rose-350 underline uppercase tracking-wider cursor-pointer ml-2"
+            >
+              Cerrar Sesión
+            </button>
+          )}
+        </div>
+        <div className="flex items-center">
+          {dbConnected ? (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+              </span>
+              Supabase Activo
             </span>
-            Supabase Cloud Activo
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-md">
-            <span className="inline-flex rounded-full h-1.5 w-1.5 bg-slate-500"></span>
-            LocalStorage Activo
-          </span>
-        )}
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-md">
+              <span className="inline-flex rounded-full h-1.5 w-1.5 bg-slate-500"></span>
+              Local Activo
+            </span>
+          )}
+        </div>
       </div>
 
       {/* HEADER BAR (Hidden when printing) */}
-      <header className="bg-white text-slate-900 border-b border-slate-200 sticky top-0 z-40 print:hidden shadow-xs h-16 flex items-center">
-        <div className="max-w-7xl mx-auto w-full px-4 flex items-center justify-between">
+      <header className="bg-white text-slate-900 border-b border-slate-200 sticky top-0 z-40 print:hidden shadow-xs h-auto sm:h-16 py-3 sm:py-0 flex items-center">
+        <div className="max-w-7xl mx-auto w-full px-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 text-white font-extrabold text-sm px-3 py-1.5 rounded-xl tracking-wider shadow-lg shadow-indigo-100">
+            <div className="bg-indigo-600 text-white font-extrabold text-sm px-3 py-1.5 rounded-xl tracking-wider shadow-lg shadow-indigo-100 shrink-0">
               SE
             </div>
             <div>
-              <h1 className="text-base font-extrabold tracking-tight text-slate-800">Inspección de Turno</h1>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Control de Calidad e Incidencias</p>
+              <h1 className="text-sm sm:text-base font-extrabold tracking-tight text-slate-800">
+                {activeModule === 'inspeccion' ? 'Inspección de Turno' : 'Producto Bajo Observación'}
+              </h1>
+              <p className="text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-wider hidden xs:block">
+                {activeModule === 'inspeccion' ? 'Control de Calidad e Incidencias' : 'Registro de Retenciones y Cuarentenas'}
+              </p>
             </div>
+          </div>
+
+          {/* Module Switcher Toggle */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full sm:w-auto justify-center">
+            <button
+              onClick={() => setActiveModule('inspeccion')}
+              className={`flex-1 sm:flex-initial px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeModule === 'inspeccion'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              📋 Inspección
+            </button>
+            <button
+              onClick={() => setActiveModule('pbo')}
+              className={`flex-1 sm:flex-initial px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeModule === 'pbo'
+                  ? 'bg-orange-650 text-white shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              🛡️ PBO
+            </button>
           </div>
         </div>
       </header>
 
       {/* WARNING INDICATORS (Fila Superior) (Hidden when printing) */}
-      <section className="bg-slate-50/50 border-b border-slate-200 py-4 px-4 print:hidden">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          
-          {/* Active Shift details summary */}
-          <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-xs flex items-center gap-3">
-            <div className="bg-indigo-50 text-indigo-600 p-2.5 rounded-xl">
-              <ClipboardCheck className="w-5 h-5" />
+      {activeModule === 'inspeccion' && currentRole === 'calidad' && (
+        <section className="bg-slate-50/50 border-b border-slate-200 py-4 px-4 print:hidden">
+          <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            
+            {/* Active Shift details summary */}
+            <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-xs flex items-center gap-3">
+              <div className="bg-indigo-50 text-indigo-600 p-2.5 rounded-xl">
+                <ClipboardCheck className="w-5 h-5" />
+              </div>
+              <div className="text-xs">
+                <span className="block font-bold text-slate-400 uppercase text-[10px] tracking-wider">Reporte Actual</span>
+                <span className="font-bold text-slate-800 block mt-0.5">
+                  {reporteId ? `Reporte N°${reporteId}` : 'Borrador sin Guardar'}
+                </span>
+                <span className="text-slate-500 block text-[10px] mt-0.5">
+                  {cabecera.fecha ? `Fecha: ${cabecera.fecha}` : 'Sin fecha'} | Grupo: {cabecera.grupo}
+                </span>
+              </div>
             </div>
-            <div className="text-xs">
-              <span className="block font-bold text-slate-400 uppercase text-[10px] tracking-wider">Reporte Actual</span>
-              <span className="font-bold text-slate-800 block mt-0.5">
-                {reporteId ? `Reporte N°${reporteId}` : 'Borrador sin Guardar'}
-              </span>
-              <span className="text-slate-500 block text-[10px] mt-0.5">
-                {cabecera.fecha ? `Fecha: ${cabecera.fecha}` : 'Sin fecha'} | Grupo: {cabecera.grupo}
-              </span>
-            </div>
-          </div>
 
-          {/* Alert: Products held under observation */}
-          <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-xs flex items-center gap-3">
-            <div className="bg-rose-50 text-rose-600 p-2.5 rounded-xl">
-              <AlertOctagon className="w-5 h-5" />
+            {/* Alert: Products held under observation */}
+            <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-xs flex items-center gap-3">
+              <div className="bg-rose-50 text-rose-600 p-2.5 rounded-xl">
+                <AlertOctagon className="w-5 h-5" />
+              </div>
+              <div className="text-xs">
+                <span className="block font-bold text-rose-400 uppercase text-[10px] tracking-wider">Bajo Observación</span>
+                <span className="font-extrabold text-rose-700 block text-sm mt-0.5">
+                  {observaciones.length} Lote(s) Retenido(s)
+                </span>
+                <span className="text-rose-500/75 block text-[10px] mt-0.5">Requieren inspección en laboratorio</span>
+              </div>
             </div>
-            <div className="text-xs">
-              <span className="block font-bold text-rose-400 uppercase text-[10px] tracking-wider">Bajo Observación</span>
-              <span className="font-extrabold text-rose-700 block text-sm mt-0.5">
-                {observaciones.length} Lote(s) Retenido(s)
-              </span>
-              <span className="text-rose-500/75 block text-[10px] mt-0.5">Requieren inspección en laboratorio</span>
-            </div>
-          </div>
 
-          {/* Alert: Deviations without hold */}
-          <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-xs flex items-center gap-3 sm:col-span-2 lg:col-span-1">
-            <div className="bg-amber-50 text-amber-600 p-2.5 rounded-xl">
-              <AlertTriangle className="w-5 h-5" />
+            {/* Alert: Deviations without hold */}
+            <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-xs flex items-center gap-3 sm:col-span-2 lg:col-span-1">
+              <div className="bg-amber-50 text-amber-600 p-2.5 rounded-xl">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="text-xs">
+                <span className="block font-bold text-amber-400 uppercase text-[10px] tracking-wider">Desviaciones Operativas</span>
+                <span className="font-extrabold text-amber-700 block text-sm mt-0.5">
+                  {desviaciones.length} Desviación(es) Menor(es)
+                </span>
+                <span className="text-amber-600 block text-[10px] mt-0.5">Registradas en envasadoras</span>
+              </div>
             </div>
-            <div className="text-xs">
-              <span className="block font-bold text-amber-400 uppercase text-[10px] tracking-wider">Desviaciones Operativas</span>
-              <span className="font-extrabold text-amber-700 block text-sm mt-0.5">
-                {desviaciones.length} Desviación(es) Menor(es)
-              </span>
-              <span className="text-amber-600 block text-[10px] mt-0.5">Registradas en envasadoras</span>
-            </div>
-          </div>
 
-        </div>
-      </section>
+          </div>
+        </section>
+      )}
 
       {/* TAB NAVIGATION (Hidden when printing) */}
-      <nav className="bg-white border-b border-slate-200 print:hidden overflow-x-auto">
-        <div className="max-w-7xl mx-auto px-4 flex">
-          <button
-            onClick={() => setActiveTab('general')}
-            className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'general' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            📋 Datos y Operación
-          </button>
-          <button
-            onClick={() => setActiveTab('calidad')}
-            className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'calidad' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            🔍 Calidad e Incidentes
-          </button>
-          <button
-            onClick={() => setActiveTab('seguimiento')}
-            className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'seguimiento' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            📌 Seguimiento y Cierre
-          </button>
-          <button
-            onClick={() => setActiveTab('rociadoras')}
-            className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'rociadoras' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            🎨 Rociadoras
-          </button>
-          <button
-            onClick={() => setActiveTab('resumen')}
-            className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'resumen' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            📊 Resumen Visual
-          </button>
-          <button
-            onClick={() => setActiveTab('historial')}
-            className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'historial' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <History className="w-3.5 h-3.5" /> Historial de Turnos
-          </button>
-        </div>
-      </nav>
+      {activeModule === 'inspeccion' && currentRole === 'calidad' && (
+        <nav className="bg-white border-b border-slate-200 print:hidden overflow-x-auto">
+          <div className="max-w-7xl mx-auto px-4 flex">
+            <button
+              onClick={() => setActiveTab('general')}
+              className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'general' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              📋 Datos y Operación
+            </button>
+            <button
+              onClick={() => setActiveTab('calidad')}
+              className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'calidad' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              🔍 Calidad e Incidentes
+            </button>
+            <button
+              onClick={() => setActiveTab('seguimiento')}
+              className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'seguimiento' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              📌 Seguimiento y Cierre
+            </button>
+            <button
+              onClick={() => setActiveTab('rociadoras')}
+              className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'rociadoras' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              🎨 Rociadoras
+            </button>
+            <button
+              onClick={() => setActiveTab('resumen')}
+              className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'resumen' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              📊 Resumen Visual
+            </button>
+            <button
+              onClick={() => setActiveTab('historial')}
+              className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'historial' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" /> Historial de Turnos
+            </button>
+          </div>
+        </nav>
+      )}
 
       {/* MAIN CONTAINER CONTENT */}
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 sm:p-6 print:p-0">
         <div className="print:block">
-          {activeTab === 'general' && (
-            <TabGeneral 
-              cabecera={cabecera}
-              onChangeCabecera={(c) => setCabecera(prev => ({ ...prev, ...c }))}
-              productos={productos}
-              onChangeProductos={setProductos}
-              analistas={analistas}
-              editable={editable}
+          {activeModule === 'pbo' ? (
+            <TabPBO 
+              currentRole={currentRole}
+              onAuthenticate={handleAuthenticate}
+              onLogout={handleLogout}
+              cabeceraFecha={cabecera.fecha}
+              cabeceraTurno={cabecera.turno}
             />
-          )}
+          ) : (
+            // Inspección de turno module
+            currentRole !== 'calidad' ? (
+              /* GORGEOUS CALIDAD LOCK SCREEN */
+              <div className="max-w-md mx-auto my-12 bg-white rounded-3xl border border-slate-200 p-8 shadow-xl text-center space-y-6">
+                <div className="bg-rose-50 text-rose-650 p-4 rounded-full w-16 h-16 mx-auto flex items-center justify-center">
+                  <Lock className="w-8 h-8 text-rose-600" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-850">Módulo Restringido: Inspección de Turno</h3>
+                  <p className="text-xs text-slate-500 mt-2 leading-relaxed font-medium">
+                    Este panel contiene parámetros técnicos de producción, identificación de rociadoras e incidentes de turno. Requiere autenticación de Calidad para continuar.
+                  </p>
+                </div>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const success = handleAuthenticate(pinInput);
+                  if (success) {
+                    setPinInput('');
+                    setLoginError(false);
+                  } else {
+                    setLoginError(true);
+                  }
+                }} className="space-y-4">
+                  <div>
+                    <input
+                      type="password"
+                      placeholder="Ingrese Clave de Seguridad..."
+                      value={pinInput}
+                      onChange={(e) => setPinInput(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-250 rounded-xl px-4 py-2.5 text-center text-sm font-semibold tracking-widest focus:outline-hidden focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition-all text-slate-800"
+                    />
+                    {loginError && (
+                      <span className="text-[10px] text-rose-600 font-extrabold uppercase mt-1.5 block tracking-wider">Clave de seguridad incorrecta</span>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-3 rounded-xl transition-all shadow-md shadow-indigo-100 cursor-pointer"
+                  >
+                    Desbloquear Panel de Calidad
+                  </button>
+                </form>
+              </div>
+            ) : (
+              /* TRADITIONAL INSPECTION TABS */
+              <>
+                {activeTab === 'general' && (
+                  <TabGeneral 
+                    cabecera={cabecera}
+                    onChangeCabecera={(c) => setCabecera(prev => ({ ...prev, ...c }))}
+                    productos={productos}
+                    onChangeProductos={setProductos}
+                    analistas={analistas}
+                    editable={editable}
+                  />
+                )}
 
-          {activeTab === 'calidad' && (
-            <TabCalidad
-              observaciones={observaciones}
-              onChangeObservaciones={setObservaciones}
-              desviaciones={desviaciones}
-              onChangeDesviaciones={setDesviaciones}
-              generales={generales}
-              onChangeGenerales={setGenerales}
-              editable={editable}
-            />
-          )}
+                {activeTab === 'calidad' && (
+                  <TabCalidad
+                    observaciones={observaciones}
+                    onChangeObservaciones={setObservaciones}
+                    desviaciones={desviaciones}
+                    onChangeDesviaciones={setDesviaciones}
+                    generales={generales}
+                    onChangeGenerales={setGenerales}
+                    editable={editable}
+                  />
+                )}
 
-          {activeTab === 'seguimiento' && (
-            <TabSeguimiento
-              trazabilidadesNuevas={trazabilidadesNuevas}
-              onChangeTrazabilidadesNuevas={setTrazabilidadesNuevas}
-              trazabilidadesResueltas={trazabilidadesResueltas}
-              onChangeTrazabilidadesResueltas={setTrazabilidadesResueltas}
-              pendientesNuevos={pendientesNuevos}
-              onChangePendientesNuevos={setPendientesNuevos}
-              pendientesResueltos={pendientesResueltos}
-              onChangePendientesResueltos={setPendientesResueltos}
-              editable={editable}
-              refreshTrigger={refreshTrigger}
-            />
-          )}
+                {activeTab === 'seguimiento' && (
+                  <TabSeguimiento
+                    trazabilidadesNuevas={trazabilidadesNuevas}
+                    onChangeTrazabilidadesNuevas={setTrazabilidadesNuevas}
+                    trazabilidadesResueltas={trazabilidadesResueltas}
+                    onChangeTrazabilidadesResueltas={setTrazabilidadesResueltas}
+                    pendientesNuevos={pendientesNuevos}
+                    onChangePendientesNuevos={setPendientesNuevos}
+                    pendientesResueltos={pendientesResueltos}
+                    onChangePendientesResueltos={setPendientesResueltos}
+                    editable={editable}
+                    refreshTrigger={refreshTrigger}
+                  />
+                )}
 
-          {activeTab === 'rociadoras' && (
-            <TabRociadoras
-              rociadoras={rociadoras}
-              onChangeRociadoras={setRociadoras}
-              editable={editable}
-            />
-          )}
+                {activeTab === 'rociadoras' && (
+                  <TabRociadoras
+                    rociadoras={rociadoras}
+                    onChangeRociadoras={setRociadoras}
+                    editable={editable}
+                  />
+                )}
 
-          {activeTab === 'resumen' && (
-            <TabResumen 
-              reporte={recopilarPayload()}
-            />
-          )}
+                {activeTab === 'resumen' && (
+                  <TabResumen 
+                    reporte={recopilarPayload()}
+                  />
+                )}
 
-          {activeTab === 'historial' && (
-            <TabHistorial
-              onLoadReporte={handleLoadReportePorId}
-              currentReporteId={reporteId}
-              refreshTrigger={refreshTrigger}
-            />
-          )}
+                {activeTab === 'historial' && (
+                  <TabHistorial
+                    onLoadReporte={handleLoadReportePorId}
+                    currentReporteId={reporteId}
+                    refreshTrigger={refreshTrigger}
+                  />
+                )}
 
-          {activeTab === 'configuracion' && (
-            <TabConfiguracion 
-              onConfigChanged={handleConfigChanged}
-            />
+                {activeTab === 'configuracion' && (
+                  <TabConfiguracion 
+                    onConfigChanged={handleConfigChanged}
+                  />
+                )}
+              </>
+            )
           )}
         </div>
       </main>
 
       {/* FOOTER ACTION BAR (Hidden when printing) */}
-      <footer className="bg-white border-t border-slate-200 py-4 px-6 print:hidden shadow-xs">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
-          
-          <div>
-            {!editable && (
-              <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" /> REPORTE FINALIZADO Y CONSOLIDADO
-              </span>
-            )}
+      {activeModule === 'inspeccion' && currentRole === 'calidad' && (
+        <footer className="bg-white border-t border-slate-200 py-4 px-6 print:hidden shadow-xs">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+            
+            <div>
+              {!editable && (
+                <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" /> REPORTE FINALIZADO Y CONSOLIDADO
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {!editable && (
+                <button
+                  onClick={handleComenzarNuevoTurno}
+                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-xs transition-all"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  Iniciar Nuevo Turno
+                </button>
+              )}
+
+              {editable && (
+                <>
+                  <button
+                    onClick={handleLlenarDatosPrueba}
+                    className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md shadow-amber-100 transition-all"
+                    title="Llena todo el formulario con datos de prueba realistas"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Cargar Datos de Prueba
+                  </button>
+                  <button
+                    onClick={() => handleGuardarAvance(true)}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md shadow-indigo-100 transition-all"
+                  >
+                    <Save className="w-4 h-4" />
+                    Guardar Avance
+                  </button>
+                  <button
+                    onClick={handleTerminarTurno}
+                    className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-xs transition-all"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    Terminar Turno
+                  </button>
+                </>
+              )}
+            </div>
+
           </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            {!editable && (
-              <button
-                onClick={handleComenzarNuevoTurno}
-                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-xs transition-all"
-              >
-                <PlusCircle className="w-4 h-4" />
-                Iniciar Nuevo Turno
-              </button>
-            )}
-
-            {editable && (
-              <>
-                <button
-                  onClick={handleLlenarDatosPrueba}
-                  className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md shadow-amber-100 transition-all"
-                  title="Llena todo el formulario con datos de prueba realistas"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  Cargar Datos de Prueba
-                </button>
-                <button
-                  onClick={() => handleGuardarAvance(true)}
-                  className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md shadow-indigo-100 transition-all"
-                >
-                  <Save className="w-4 h-4" />
-                  Guardar Avance
-                </button>
-                <button
-                  onClick={handleTerminarTurno}
-                  className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-xs transition-all"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  Terminar Turno
-                </button>
-              </>
-            )}
-          </div>
-
-        </div>
-      </footer>
+        </footer>
+      )}
 
     </div>
   );

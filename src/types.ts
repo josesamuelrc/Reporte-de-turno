@@ -14,6 +14,9 @@ export interface ReporteTurno {
   hum_cumple: boolean;
   caida_tension: string;
   observaciones_ambiente: string;
+  equipos_medicion?: string;
+  start_quality_cumple?: boolean;
+  observacion_start_quality?: string;
   estado: 'Borrador' | 'Terminado';
   created_at?: string;
 }
@@ -23,8 +26,11 @@ export interface ProductoTurno {
   reporte_id?: number;
   codigo_sap: string;
   descripcion: string;
+  orden?: string;
   lote: string;
-  cantidad: string;
+  cantidad?: string;
+  paletas?: string;
+  camadas?: string;
   obs: string;
 }
 
@@ -56,6 +62,10 @@ export interface Trazabilidad {
   ticket: string;
   estado: 'Pendiente' | 'Finalizada';
   obs: string;
+  hacia_adelante?: boolean;
+  hacia_atras?: boolean;
+  tickets_inspeccionados?: string;
+  tickets_retenidos?: string;
 }
 
 export interface DesviacionSinRetencion {
@@ -96,6 +106,7 @@ export interface IdentificacionRociadoras {
   linea: string;
   maquina: string;
   color: string;
+  hora?: string;
 }
 
 export interface ReporteCompleto {
@@ -110,4 +121,49 @@ export interface ReporteCompleto {
   trazabilidades_resueltas: number[]; // ids of resolved active trazabilidades
   pendientes_nuevos: Pendiente[];
   pendientes_resueltos: number[]; // ids of resolved active pendientes
+}
+
+export interface LotePBO {
+  id_pbo: string;                  // Folio único (Ej: PBO-001)
+  producto: string;                // Nombre completo del producto
+  formato: string;                 // Formato de presentación para cálculo de latas
+  lote: string;                    // Código alfanumérico de lote
+  orden: string;                   // Orden de producción
+  fecha_produccion: string;        // Fecha de fabricación
+  defecto_general: string;         // Defecto inicial reportado
+  cantidad_total_latas: number;    // Cálculo matemático: (Paletas * latasPorPaleta) + (Camadas * 472)
+  ubicacion: string;               // Almacen actual ("Almacen de PBO", "Transicion", "Almacen de PT")
+  estatus_general: 'Abierto' | 'Cerrado';
+  medidas_correctivas?: string;
+  causas?: string;
+  usuario_registro: string;
+  creado_el: string;
+  fecha_registro?: string;         // Para filtrado por fecha/turno en PBO
+  turno_registro?: number;         // Para filtrado por fecha/turno en PBO
+}
+
+export interface Paleta {
+  id: string;                      // ID único
+  id_pbo: string;                  // Llave foránea hacia LotePBO
+  nro_ticket: string;              // Número físico del ticket de retención
+  camadas_sueltas: number;         // Camadas sueltas (si no es paleta completa, 0 indica paleta estándar)
+  defecto: string;                 // Defecto específico de esta paleta
+  nca: number;                     // Nivel de Calidad Aceptable (NCA) asignado
+  estatus: 'Sin reprocesar' | 'En proceso' | 'Reprocesado' | 'Liberado Directo' | 'Desecho';
+  creado_el: string;
+}
+
+export interface Reproceso {
+  id: string;
+  id_pbo: string;
+  tickets_originales_consumidos: string; // Tickets que entraron al reproceso
+  nuevo_ticket_reprocesado: string;      // Nuevo ticket generado físico
+  camadas_sueltas: number;               // 0 si es paleta completa
+  estatus_calidad: 'En Control de Calidad' | 'Aprobado' | 'Rechazado';
+  estatus_logistica: 'En espera' | 'Confirmado' | 'Inconsistencia';
+  observacion_laboratorio: string;
+  usuario_registro: string;
+  creado_el: string;
+  fecha_registro?: string;
+  turno_registro?: number;
 }

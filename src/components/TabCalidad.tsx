@@ -3,6 +3,7 @@ import React from 'react';
 import { Plus, Trash2, ShieldAlert, AlertTriangle, MessageSquare } from 'lucide-react';
 import { ProductoObservacion, DesviacionSinRetencion, ObservacionGeneral } from '../types';
 import ExpandableCell from './ExpandableCell';
+import { CATALOGO_PRODUCTOS_PBO } from './TabPBO';
 
 interface TabCalidadProps {
   observaciones: ProductoObservacion[];
@@ -43,7 +44,14 @@ export default function TabCalidad({
   const updateObsCell = (index: number, key: keyof ProductoObservacion, value: string) => {
     if (!editable) return;
     const updated = [...observaciones];
-    updated[index] = { ...updated[index], [key]: value };
+    let updatedRow = { ...updated[index], [key]: value };
+    if (key === 'codigo_sap') {
+      const matched = CATALOGO_PRODUCTOS_PBO.find(p => p.codigo.toLowerCase() === value.toLowerCase().trim());
+      if (matched) {
+        updatedRow.descripcion = matched.nombre;
+      }
+    }
+    updated[index] = updatedRow;
     onChangeObservaciones(updated);
   };
 
@@ -66,7 +74,14 @@ export default function TabCalidad({
   const updateDesvCell = (index: number, key: keyof DesviacionSinRetencion, value: string) => {
     if (!editable) return;
     const updated = [...desviaciones];
-    updated[index] = { ...updated[index], [key]: value };
+    let updatedRow = { ...updated[index], [key]: value };
+    if (key === 'codigo_sap') {
+      const matched = CATALOGO_PRODUCTOS_PBO.find(p => p.codigo.toLowerCase() === value.toLowerCase().trim());
+      if (matched) {
+        updatedRow.descripcion = matched.nombre;
+      }
+    }
+    updated[index] = updatedRow;
     onChangeDesviaciones(updated);
   };
 
@@ -95,164 +110,8 @@ export default function TabCalidad({
 
   return (
     <div className="space-y-8">
-      {/* 1. PRODUCTO BAJO OBSERVACION */}
-      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-5 h-5 text-red-600 animate-pulse" />
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800">Producto Bajo Observación (Retención)</h2>
-              <p className="text-xs text-slate-500">Lotes que presentan desviaciones críticas y quedan bloqueados preventivamente.</p>
-            </div>
-          </div>
-          {editable && (
-            <button
-              onClick={addObsRow}
-              className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-all cursor-pointer shadow-xs"
-            >
-              <Plus className="w-4 h-4" />
-              Retener Producto
-            </button>
-          )}
-        </div>
-
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
-          <table className="w-full text-left border-collapse min-w-[1200px]">
-            <thead>
-              <tr className="bg-slate-50 text-slate-600 text-xs font-bold uppercase border-b border-slate-200">
-                <th className="py-3 px-4 w-[8%]">Cód SAP</th>
-                <th className="py-3 px-4 w-[16%]">Descripción</th>
-                <th className="py-3 px-4 w-[8%]">Orden</th>
-                <th className="py-3 px-4 w-[8%]">Lote</th>
-                <th className="py-3 px-4 w-[12%]">Defecto</th>
-                <th className="py-3 px-4 w-[8%]"># Ticket</th>
-                <th className="py-3 px-4 w-[8%]">NCA</th>
-                <th className="py-3 px-4 w-[12%]">Causa Raíz</th>
-                <th className="py-3 px-4 w-[12%]">Acciones</th>
-                <th className="py-3 px-4 w-[8%]">OBS.</th>
-                {editable && <th className="py-3 px-4 w-[4%] text-center"></th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-sm">
-              {observaciones.length === 0 ? (
-                <tr>
-                  <td colSpan={editable ? 11 : 10} className="py-8 text-center text-slate-400 font-medium bg-slate-50/40">
-                    Ningún lote de producto quedó bajo observación en este turno.
-                  </td>
-                </tr>
-              ) : (
-                observaciones.map((obs, idx) => (
-                  <tr key={idx} className="hover:bg-red-50/10 transition-all">
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.codigo_sap}
-                        onChange={(val) => updateObsCell(idx, 'codigo_sap', val)}
-                        placeholder="SAP"
-                        label="Código SAP"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.descripcion}
-                        onChange={(val) => updateObsCell(idx, 'descripcion', val)}
-                        placeholder="Descripción"
-                        label="Descripción de Producto Bajo Observación"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.orden}
-                        onChange={(val) => updateObsCell(idx, 'orden', val)}
-                        placeholder="Orden"
-                        label="Número de Orden"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.lote}
-                        onChange={(val) => updateObsCell(idx, 'lote', val)}
-                        placeholder="Lote"
-                        label="Lote de Retención"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.defecto}
-                        onChange={(val) => updateObsCell(idx, 'defecto', val)}
-                        placeholder="Defecto"
-                        label="Defectos / Desviaciones"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.ticket}
-                        onChange={(val) => updateObsCell(idx, 'ticket', val)}
-                        placeholder="Ticket"
-                        label="Tickets Asociados"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.nca}
-                        onChange={(val) => updateObsCell(idx, 'nca', val)}
-                        placeholder="NCA"
-                        label="NCA / Cantidad Retenida"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.causa_raiz}
-                        onChange={(val) => updateObsCell(idx, 'causa_raiz', val)}
-                        placeholder="Causa"
-                        label="Análisis de Causa Raíz"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.acciones}
-                        onChange={(val) => updateObsCell(idx, 'acciones', val)}
-                        placeholder="Acciones"
-                        label="Acciones Correctivas Tomadas"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={obs.obs}
-                        onChange={(val) => updateObsCell(idx, 'obs', val)}
-                        placeholder="..."
-                        label="Observaciones de Trazabilidad y Detalle"
-                      />
-                    </td>
-                    {editable && (
-                      <td className="text-center py-1 px-1.5">
-                        <button
-                          onClick={() => removeObsRow(idx)}
-                          className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-md cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       {/* 2. DESVIACIONES SIN RETENCION */}
-      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-6">
+      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-amber-500" />
@@ -273,41 +132,30 @@ export default function TabCalidad({
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-slate-200">
-          <table className="w-full text-left border-collapse min-w-[1100px]">
+          <table className="w-full text-left border-collapse min-w-[900px]">
             <thead>
               <tr className="bg-slate-50 text-slate-600 text-xs font-bold uppercase border-b border-slate-200">
-                <th className="py-3 px-4 w-[7%]">Hora</th>
-                <th className="py-3 px-4 w-[8%]">Cód SAP</th>
-                <th className="py-3 px-4 w-[18%]">Descripción</th>
-                <th className="py-3 px-4 w-[10%]">Lote</th>
-                <th className="py-3 px-4 w-[10%]">Lugar</th>
-                <th className="py-3 px-4 w-[12%]">Defecto</th>
-                <th className="py-3 px-4 w-[7%]">NCA</th>
-                <th className="py-3 px-4 w-[9%]">Paletas Afect.</th>
-                <th className="py-3 px-4 w-[10%]">Pruebas Func.</th>
-                <th className="py-3 px-4 w-[9%]">Observaciones</th>
+                <th className="py-3 px-4 w-[10%]">Cód SAP</th>
+                <th className="py-3 px-4 w-[24%]">Descripción</th>
+                <th className="py-3 px-4 w-[12%]">Lote</th>
+                <th className="py-3 px-4 w-[16%]">Defecto</th>
+                <th className="py-3 px-4 w-[8%]">NCA</th>
+                <th className="py-3 px-4 w-[11%]">Paletas Afect.</th>
+                <th className="py-3 px-4 w-[11%]">Pruebas Func.</th>
+                <th className="py-3 px-4 w-[14%]">Observaciones</th>
                 {editable && <th className="py-3 px-4 w-[4%] text-center"></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
               {desviaciones.length === 0 ? (
                 <tr>
-                  <td colSpan={editable ? 11 : 10} className="py-8 text-center text-slate-400 font-medium bg-slate-50/40">
+                  <td colSpan={editable ? 9 : 8} className="py-8 text-center text-slate-400 font-medium bg-slate-50/40">
                     No se reportaron desviaciones menores sin retención.
                   </td>
                 </tr>
               ) : (
                 desviaciones.map((desv, idx) => (
                   <tr key={idx} className="hover:bg-amber-50/10 transition-all">
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={desv.hora}
-                        onChange={(val) => updateDesvCell(idx, 'hora', val)}
-                        placeholder="Ej. 14:30"
-                        label="Hora de Detección"
-                      />
-                    </td>
                     <td className="py-1 px-1.5">
                       <ExpandableCell
                         disabled={!editable}
@@ -333,15 +181,6 @@ export default function TabCalidad({
                         onChange={(val) => updateDesvCell(idx, 'lote', val)}
                         placeholder="Lote"
                         label="Lote del Producto"
-                      />
-                    </td>
-                    <td className="py-1 px-1.5">
-                      <ExpandableCell
-                        disabled={!editable}
-                        value={desv.tipo}
-                        onChange={(val) => updateDesvCell(idx, 'tipo', val)}
-                        placeholder="Lugar"
-                        label="Lugar de la Desviación"
                       />
                     </td>
                     <td className="py-1 px-1.5">
@@ -408,7 +247,7 @@ export default function TabCalidad({
       </div>
 
       {/* 3. OBSERVACIONES GENERALES */}
-      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-6">
+      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-5 h-5 text-indigo-600" />

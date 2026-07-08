@@ -1,7 +1,8 @@
 // TabResumen.tsx - Display Lote column inside tables & grid summaries
-import React, { useRef, useState } from 'react';
-import { Printer, AlertOctagon, AlertTriangle, CheckCircle, XCircle, Tag, Layers, FileText, ArrowRightLeft, FileCheck, Copy } from 'lucide-react';
-import { ReporteCompleto } from '../types';
+import React, { useRef, useState, useEffect } from 'react';
+import { Printer, AlertOctagon, AlertTriangle, CheckCircle, XCircle, Tag, Layers, FileText, ArrowRightLeft, FileCheck, Copy, Package, ShieldAlert, RotateCcw } from 'lucide-react';
+import { ReporteCompleto, LotePBO, Paleta, Reproceso } from '../types';
+import { getLotesPBO, getPaletasPBO, getReprocesosPBO } from '../db';
 
 interface TabResumenProps {
   reporte: ReporteCompleto | null;
@@ -10,6 +11,25 @@ interface TabResumenProps {
 export default function TabResumen({ reporte }: TabResumenProps) {
   const printAreaRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [pboLotes, setPboLotes] = useState<LotePBO[]>([]);
+  const [pboPaletas, setPboPaletas] = useState<Paleta[]>([]);
+  const [pboReprocesos, setPboReprocesos] = useState<Reproceso[]>([]);
+
+  useEffect(() => {
+    const loadPboData = async () => {
+      try {
+        const l = await getLotesPBO();
+        const p = await getPaletasPBO();
+        const r = await getReprocesosPBO();
+        setPboLotes(l);
+        setPboPaletas(p);
+        setPboReprocesos(r);
+      } catch (err) {
+        console.error("Error loading PBO in TabResumen", err);
+      }
+    };
+    loadPboData();
+  }, []);
 
   if (!reporte) {
     return (
@@ -22,6 +42,15 @@ export default function TabResumen({ reporte }: TabResumenProps) {
   }
 
   const { cabecera, productos, observaciones, desviaciones, generales, rociadoras, trazabilidades_nuevas, pendientes_nuevos } = reporte;
+
+  // Filter PBO lotes created/registered in this shift
+  const matchingPboLotes = pboLotes.filter(
+    l => l.fecha_registro === cabecera.fecha && l.turno_registro === cabecera.turno
+  );
+
+  const matchingReprocesos = pboReprocesos.filter(
+    r => r.fecha_registro === cabecera.fecha && r.turno_registro === cabecera.turno
+  );
 
   const handlePrint = () => {
     window.print();
@@ -48,12 +77,12 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     text += `📅 *Fecha:* ${formattedDate}\n`;
     text += `👥 *Grupo:* ${cabecera.grupo} | ⏰ *Turno:* T${cabecera.turno}\n`;
     text += `👤 *Analista:* ${cabecera.analista || 'No asignado'}\n`;
-    text += `🌡️ *Ambiente:* Temp: ${cabecera.temp_cumple ? 'CUMPLE ✅' : 'FUERA ❌'} | Hum: ${cabecera.hum_cumple ? 'CUMPLE ✅' : 'FUERA ❌'}\n`;
-    if (cabecera.caida_tension) {
-      text += `⚡ *Fluctuación Eléctrica:* ${cabecera.caida_tension}\n`;
+    text += `⭐ *Start Quality:* ${cabecera.temp_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
+    if (cabecera.temp_cumple === false && cabecera.observaciones_ambiente) {
+      text += `⚠️ *Obs. Start Quality:* ${cabecera.observaciones_ambiente}\n`;
     }
-    if (cabecera.observaciones_ambiente) {
-      text += `📝 *Observación Ambiente:* ${cabecera.observaciones_ambiente}\n`;
+    if (cabecera.caida_tension) {
+      text += `🛠️ *Equipos de Medición:* ${cabecera.caida_tension}\n`;
     }
     text += `\n------------------------------------\n\n`;
 
@@ -62,7 +91,7 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     if (productos.length > 0) {
       productos.forEach(p => {
         text += `• SAP: *${p.codigo_sap}* - ${p.descripcion}\n`;
-        text += `  - *Lote:* ${p.lote} | *Cant:* ${p.cantidad}\n`;
+        text += `  - *Orden:* ${p.orden || '—'} | *Lote:* ${p.lote} | *Paletas:* ${p.paletas || '—'} | *Camadas:* ${p.camadas || '—'}\n`;
         if (p.obs) {
           text += `  - _Obs:_ ${p.obs}\n`;
         }
@@ -72,26 +101,18 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     }
     text += `\n------------------------------------\n\n`;
 
-    // --- RETENCIONES ---
-    text += `🔴 *2. PRODUCTO BAJO OBSERVACIÓN (RETENIDO)*\n`;
-    if (observaciones.length > 0) {
-      text += `⚠️ *Total:* ${observaciones.length} lote(s) retenidos:\n`;
-      observaciones.forEach((o) => {
-        text += `• *[Lote ${o.lote}]* - ${o.descripcion} (SAP: ${o.codigo_sap})\n`;
-        text += `  - *Orden:* ${o.orden} | *Ticket:* ${o.ticket || 'S/N'} | *NCA:* ${o.nca || '—'}\n`;
-        text += `  - *Defecto:* _${o.defecto}_\n`;
-        if (o.causa_raiz) {
-          text += `  - *Causa:* ${o.causa_raiz}\n`;
-        }
-        if (o.acciones) {
-          text += `  - *Acción:* ${o.acciones}\n`;
-        }
-        if (o.obs) {
-          text += `  - *Detalles:* ${o.obs}\n`;
-        }
+    // --- PBO MOVEMENTS OF THE SHIFT ---
+    text += `🔴 *2. PRODUCTO BAJO OBSERVACIÓN (PBO)*\n`;
+    if (matchingPboLotes.length > 0) {
+      text += `⚠️ *Total:* ${matchingPboLotes.length} lote(s) registrados o movidos:\n`;
+      matchingPboLotes.forEach(l => {
+        text += `• *Folio:* ${l.id_pbo} | Producto: ${l.producto}\n`;
+        text += `  - *Lote:* ${l.lote} | *Orden:* ${l.orden} | *Cant:* ${l.cantidad_total_latas.toLocaleString()} latas\n`;
+        text += `  - *Defecto:* _${l.defecto_general}_\n`;
+        text += `  - *Ubicación Física:* ${l.ubicacion.toUpperCase()}\n`;
       });
     } else {
-      text += `✅ No se registraron bloqueos ni retenciones de producto en el turno.\n`;
+      text += `✅ Sin movimientos de Producto Bajo Observación (PBO) creados en este turno.\n`;
     }
     text += `\n------------------------------------\n\n`;
 
@@ -163,10 +184,26 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     if (rociadoras.length > 0) {
       text += `🏷️ *7. COLORES DE ROCIADORAS ACTIVAS*\n`;
       rociadoras.forEach(r => {
-        text += `• Maq ${r.maquina} (${r.linea}): *${r.color}*\n`;
+        text += `• Maq ${r.maquina} (${r.linea}): *${r.color}* (${r.hora || 'S/H'})\n`;
       });
       text += `\n------------------------------------\n\n`;
     }
+
+    // --- REPROCESOS PBO ---
+    text += `🔄 *8. REPROCESOS REALIZADOS DURANTE EL TURNO*\n`;
+    if (matchingReprocesos.length > 0) {
+      text += `⚠️ *Total:* ${matchingReprocesos.length} paleta(s) reprocesada(s):\n`;
+      matchingReprocesos.forEach(r => {
+        const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
+        text += `• Folio PBO: *${r.id_pbo}* ${pboInfo ? `(Lote: ${pboInfo.lote})` : ''}\n`;
+        text += `  - *Ticket Nuevo:* ${r.nuevo_ticket_reprocesado}\n`;
+        text += `  - *Tickets Consumidos:* ${r.tickets_originales_consumidos}\n`;
+        text += `  - *Estatus Calidad:* ${r.estatus_calidad} | *Estatus Logística:* ${r.estatus_logistica}\n`;
+      });
+    } else {
+      text += `✅ No se registraron reprocesos de PBO en este turno.\n`;
+    }
+    text += `\n------------------------------------\n\n`;
 
     text += `👉 *Generado desde la App Polar de Control de Calidad*\n`;
     text += `====================================`;
@@ -204,7 +241,7 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
   };
 
-  const cantObs = observaciones.length;
+  const cantObs = matchingPboLotes.length;
   const cantDesv = desviaciones.length;
 
   return (
@@ -291,54 +328,43 @@ export default function TabResumen({ reporte }: TabResumenProps) {
         </div>
 
         {/* METRICS & PARAMETERS CHECK */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {/* Temperature Status */}
-          <div className="bg-slate-50 border border-slate-150 px-3 py-1.5 rounded-xl flex items-center justify-between text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Start Quality Status */}
+          <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl flex items-center justify-between text-xs">
             <div>
-              <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Temp. Ambiente</span>
-              <span className="text-[10px] font-extrabold text-slate-500 leading-none mt-1 block">Normativa</span>
+              <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Start Quality</span>
+              <span className="text-[10px] font-extrabold text-slate-500 leading-none mt-1 block">Arranque de Turno</span>
             </div>
-            {cabecera.temp_cumple ? (
+            {cabecera.temp_cumple !== false ? (
               <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200">
-                <CheckCircle className="w-3 h-3 text-emerald-600" /> OK
+                <CheckCircle className="w-3 h-3 text-emerald-600" /> CUMPLE
               </span>
             ) : (
-              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200">
-                <XCircle className="w-3 h-3 text-rose-600" /> FUERA
+              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200 animate-pulse">
+                <XCircle className="w-3 h-3 text-rose-600" /> NO CUMPLE
               </span>
             )}
           </div>
 
-          {/* Humidity Status */}
-          <div className="bg-slate-50 border border-slate-150 px-3 py-1.5 rounded-xl flex items-center justify-between text-xs">
-            <div>
-              <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Hum. Relativa</span>
-              <span className="text-[10px] font-extrabold text-slate-500 leading-none mt-1 block">Normativa</span>
-            </div>
-            {cabecera.hum_cumple ? (
-              <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200">
-                <CheckCircle className="w-3 h-3 text-emerald-600" /> OK
-              </span>
-            ) : (
-              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200">
-                <XCircle className="w-3 h-3 text-rose-600" /> FUERA
-              </span>
-            )}
-          </div>
-
-          {/* Voltage Drops */}
-          <div className="bg-slate-50 border border-slate-150 px-3 py-1.5 rounded-xl text-xs col-span-1 md:col-span-2">
-            <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Fluctuaciones de Tensión</span>
+          {/* Equipos de Medición */}
+          <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl text-xs col-span-1 md:col-span-2">
+            <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Equipos de Medición</span>
             <span className="text-[11px] font-extrabold text-slate-700 block truncate mt-1">
-              {cabecera.caida_tension || 'Sin caídas reportadas'}
+              {cabecera.caida_tension || 'Sin novedades reportadas'}
             </span>
           </div>
         </div>
 
-        {/* Ambient notes */}
+        {/* Start Quality Obs */}
         {cabecera.observaciones_ambiente && (
-          <div className="bg-indigo-50/40 border border-indigo-100 px-3 py-1.5 rounded-lg text-[10px] text-indigo-900 leading-relaxed">
-            <span className="font-extrabold uppercase text-[9px] tracking-wider mr-1 text-indigo-750">Obs. Ambientales:</span>
+          <div className={`border px-3 py-1.5 rounded-lg text-[10px] leading-relaxed ${
+            cabecera.temp_cumple === false 
+              ? 'bg-rose-50/40 border-rose-100 text-rose-900' 
+              : 'bg-indigo-50/40 border-indigo-100 text-indigo-900'
+          }`}>
+            <span className="font-extrabold uppercase text-[9px] tracking-wider mr-1">
+              {cabecera.temp_cumple === false ? 'Observación de No Cumplimiento:' : 'Comentario de Arranque:'}
+            </span>
             {cabecera.observaciones_ambiente}
           </div>
         )}
@@ -357,8 +383,8 @@ export default function TabResumen({ reporte }: TabResumenProps) {
               </div>
             </div>
             {cantObs > 0 && (
-              <span className="text-[9px] text-slate-600 font-bold bg-white px-1.5 py-0.5 rounded border shadow-2xs truncate max-w-[150px]" title={`Lote ${observaciones[cantObs - 1].lote}: ${observaciones[cantObs - 1].defecto}`}>
-                Lote: {observaciones[cantObs - 1].lote}
+              <span className="text-[9px] text-slate-600 font-bold bg-white px-1.5 py-0.5 rounded border shadow-2xs truncate max-w-[150px]" title={`Lote ${matchingPboLotes[cantObs - 1].lote}: ${matchingPboLotes[cantObs - 1].defecto_general}`}>
+                Lote: {matchingPboLotes[cantObs - 1].lote}
               </span>
             )}
           </div>
@@ -405,11 +431,16 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                     </div>
                     <div>
                       <div className="font-bold text-slate-800">{p.descripcion}</div>
+                      <div className="text-slate-500 font-medium text-[10px] mt-0.5">Orden: {p.orden || '—'}</div>
                       {p.obs && <div className="text-slate-400 italic mt-1 text-[10px]">Obs: {p.obs}</div>}
                     </div>
                     <div className="flex justify-between items-center pt-1.5 border-t border-slate-200/60 text-[10px]">
-                      <span className="text-slate-400 uppercase font-bold">Cantidad:</span>
-                      <span className="font-extrabold text-slate-700">{p.cantidad}</span>
+                      <div>
+                        <span className="text-slate-400 uppercase font-bold mr-1">Paletas:</span>
+                        <span className="font-extrabold text-slate-700 mr-3">{p.paletas || '0'}</span>
+                        <span className="text-slate-400 uppercase font-bold mr-1">Camadas:</span>
+                        <span className="font-extrabold text-slate-700">{p.camadas || '0'}</span>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -420,11 +451,13 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                 <table className="w-full text-left border-collapse text-[11px]">
                   <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
                     <tr>
-                      <th className="py-1.5 px-2.5 w-[15%]">Código SAP</th>
-                      <th className="py-1.5 px-2.5 w-[45%]">Descripción del Producto</th>
-                      <th className="py-1.5 px-2.5 w-[15%]">Lote</th>
-                      <th className="py-1.5 px-2.5 w-[12%]">Cantidad</th>
-                      <th className="py-1.5 px-2.5 w-[13%]">Comentarios</th>
+                      <th className="py-1.5 px-2.5 w-[12%]">Código SAP</th>
+                      <th className="py-1.5 px-2.5 w-[33%]">Descripción del Producto</th>
+                      <th className="py-1.5 px-2.5 w-[15%]">Orden</th>
+                      <th className="py-1.5 px-2.5 w-[12%]">Lote</th>
+                      <th className="py-1.5 px-2.5 w-[10%]">Paletas</th>
+                      <th className="py-1.5 px-2.5 w-[10%]">Camadas</th>
+                      <th className="py-1.5 px-2.5 w-[8%]">Comentarios</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-755">
@@ -432,8 +465,10 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                       <tr key={idx} className="hover:bg-slate-50/40">
                         <td className="py-1.5 px-2.5 font-mono font-bold text-slate-600">{p.codigo_sap}</td>
                         <td className="py-1.5 px-2.5 font-semibold">{p.descripcion}</td>
+                        <td className="py-1.5 px-2.5">{p.orden || '—'}</td>
                         <td className="py-1.5 px-2.5 font-semibold">{p.lote}</td>
-                        <td className="py-1.5 px-2.5">{p.cantidad}</td>
+                        <td className="py-1.5 px-2.5 font-semibold">{p.paletas || '0'}</td>
+                        <td className="py-1.5 px-2.5 font-semibold">{p.camadas || '0'}</td>
                         <td className="py-1.5 px-2.5 text-slate-400 italic">{p.obs || '—'}</td>
                       </tr>
                     ))}
@@ -443,90 +478,53 @@ export default function TabResumen({ reporte }: TabResumenProps) {
             </div>
           )}
 
-          {/* 2. Productos Retenidos */}
-          {observaciones.length > 0 && (
-            <div className="space-y-1.5">
-              <h3 className="text-[10px] font-bold text-red-650 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
-                <AlertOctagon className="w-3.5 h-3.5 animate-pulse text-red-650" />
-                2. Producto Bajo Observación (Retención)
-              </h3>
-
-              {/* MOBILE CARDS (Hidden in Print) */}
-              <div className="block md:hidden print:hidden space-y-2">
-                {observaciones.map((o, idx) => (
-                  <div key={idx} className="bg-red-50/10 border border-red-200/60 p-3 rounded-xl space-y-2 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="font-mono font-bold text-slate-600 bg-slate-200/80 px-1.5 py-0.5 rounded text-[10px]">{o.codigo_sap}</span>
-                      <span className="font-bold text-red-750 bg-red-100/60 px-2 py-0.5 rounded text-[10px]">Lote: {o.lote}</span>
-                    </div>
-                    <div>
-                      <div className="font-bold text-slate-800">{o.descripcion}</div>
-                      <div className="text-red-650 font-bold mt-1 text-[11px] flex items-center gap-1">
-                        <AlertOctagon className="w-3 h-3 text-red-600" /> {o.defecto}
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 border-t border-slate-200/60 text-[10px] text-slate-600">
-                      <div>
-                        <span className="text-slate-400 uppercase font-bold block">Orden:</span>
-                        <span className="font-semibold text-slate-800">{o.orden}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 uppercase font-bold block">Ticket / Boleto:</span>
-                        <span className="font-mono font-semibold text-slate-800">{o.ticket || 'S/N'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 uppercase font-bold block">NCA:</span>
-                        <span className="font-semibold text-slate-800">{o.nca}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 uppercase font-bold block">Causa Raíz:</span>
-                        <span className="font-semibold text-slate-700">{o.causa_raiz || '—'}</span>
-                      </div>
-                      <div className="col-span-2">
-                        <span className="text-slate-400 uppercase font-bold block">Acciones:</span>
-                        <span className="font-semibold text-slate-700 leading-normal">{o.acciones || '—'}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+          {/* 2. Movimientos de Producto Bajo Observación (PBO) del Turno */}
+          <div className="space-y-1.5 pt-1">
+            <h3 className="text-[10px] font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-orange-600 animate-pulse" />
+              2. Movimientos de Producto Bajo Observación (PBO) del Turno
+            </h3>
+            {matchingPboLotes.length === 0 ? (
+              <div className="bg-slate-50 border border-slate-200/60 p-3 rounded-xl text-[11px] text-slate-400 font-bold italic text-center">
+                ✓ No se registraron folios de Producto Bajo Observación (PBO) creados durante el turno actual.
               </div>
-
-              {/* DESKTOP/PRINT TABLE */}
-              <div className="hidden md:block print:block overflow-x-auto rounded-xl border border-red-200/60">
-                <table className="w-full text-left border-collapse text-[11px] min-w-[850px] lg:min-w-0 lg:w-full">
-                  <thead className="bg-red-50/30 text-red-800 font-bold border-b border-red-100">
-                    <tr>
-                      <th className="py-1.5 px-2.5 w-[10%]">Cód SAP</th>
-                      <th className="py-1.5 px-2.5 w-[22%]">Descripción</th>
-                      <th className="py-1.5 px-2.5 w-[8%]">Orden</th>
-                      <th className="py-1.5 px-2.5 w-[8%]">Lote</th>
-                      <th className="py-1.5 px-2.5 w-[12%]">Defecto</th>
-                      <th className="py-1.5 px-2.5 w-[8%]">Ticket</th>
-                      <th className="py-1.5 px-2.5 w-[8%]">NCA</th>
-                      <th className="py-1.5 px-2.5 w-[12%]">Causa Raíz</th>
-                      <th className="py-1.5 px-2.5 w-[12%]">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-red-50 text-slate-755">
-                    {observaciones.map((o, idx) => (
-                      <tr key={idx} className="hover:bg-red-50/10">
-                        <td className="py-1.5 px-2.5 font-mono font-bold text-slate-650">{o.codigo_sap}</td>
-                        <td className="py-1.5 px-2.5 font-semibold">{o.descripcion}</td>
-                        <td className="py-1.5 px-2.5">{o.orden}</td>
-                        <td className="py-1.5 px-2.5 font-bold text-slate-700">{o.lote}</td>
-                        <td className="py-1.5 px-2.5 text-red-600 font-semibold">{o.defecto}</td>
-                        <td className="py-1.5 px-2.5 font-mono">{o.ticket || 'S/N'}</td>
-                        <td className="py-1.5 px-2.5">{o.nca}</td>
-                        <td className="py-1.5 px-2.5 text-slate-500 whitespace-normal break-words">{o.causa_raiz}</td>
-                        <td className="py-1.5 px-2.5 text-slate-600 whitespace-normal break-words">{o.acciones}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {matchingPboLotes.map(l => {
+                    const lotePalets = pboPaletas.filter(p => p.id_pbo === l.id_pbo);
+                    const loteRepros = pboReprocesos.filter(r => r.id_pbo === l.id_pbo);
+                    return (
+                      <div key={l.id_pbo} className="bg-orange-50/10 border border-orange-100 p-3.5 rounded-xl text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono font-black text-slate-850 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-[10px]">{l.id_pbo}</span>
+                          <span className="text-[9px] font-bold uppercase text-orange-700 bg-orange-100 px-1.5 py-0.5 rounded">Ubicación: {l.ubicacion.toUpperCase()}</span>
+                        </div>
+                        <div className="font-bold text-slate-850">{l.producto}</div>
+                        <div className="text-[10px] text-slate-500 leading-normal">
+                          Lote: <strong className="font-mono text-slate-700">{l.lote}</strong> | Orden: <strong className="font-mono text-slate-700">{l.orden}</strong> | Cans: <strong>{l.cantidad_total_latas.toLocaleString()}</strong>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-orange-100/40 text-[10px] text-slate-600">
+                          <span className="font-extrabold uppercase text-[9px] block text-slate-400 mb-0.5">Defecto general:</span>
+                          {l.defecto_general}
+                        </div>
+                        {lotePalets.length > 0 && (
+                          <div className="text-[10px] text-slate-500">
+                            Paletas ({lotePalets.length}): <span className="font-mono text-slate-600">{lotePalets.map(p => `${p.nro_ticket} (${p.estatus})`).join(', ')}</span>
+                          </div>
+                        )}
+                        {loteRepros.length > 0 && (
+                          <div className="border-t border-dashed border-orange-200 pt-2 text-[10px] text-indigo-700 font-medium">
+                            🔄 Reprocesado en turno: {loteRepros.map(r => r.nuevo_ticket_reprocesado).join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* 3. Desviaciones Sin Retención */}
           {desviaciones.length > 0 && (
@@ -757,23 +755,52 @@ export default function TabResumen({ reporte }: TabResumenProps) {
             </div>
           )}
 
-          {/* 7. Colores de Rociadoras */}
-          {rociadoras.length > 0 && (
-            <div className="space-y-1.5">
-              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
-                <Tag className="w-3.5 h-3.5 text-indigo-500" />
-                7. Colores Activos de Rociadoras
+          {/* 7. Reprocesos realizados durante el turno */}
+          {matchingReprocesos.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              <h3 className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
+                <RotateCcw className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+                7. Reprocesos realizados durante el turno
               </h3>
-              <div className="flex flex-wrap gap-2 pt-1">
-                {rociadoras.map((r, idx) => (
-                  <div key={idx} className="bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-150 flex items-center gap-2 text-[10px] shadow-2xs">
-                    <span className="text-slate-400 font-bold uppercase text-[8px]">{r.linea}</span>
-                    <span className="font-bold text-slate-700">Maq. {r.maquina}:</span>
-                    <span className="font-extrabold text-indigo-600 bg-indigo-50/50 px-1.5 py-0.5 rounded border border-indigo-100">
-                      {r.color}
-                    </span>
-                  </div>
-                ))}
+              
+              {/* DESKTOP/PRINT TABLE */}
+              <div className="overflow-x-auto rounded-xl border border-slate-200 mt-2">
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead className="bg-indigo-50/50 text-indigo-800 font-bold border-b border-indigo-100">
+                    <tr>
+                      <th className="py-1.5 px-2.5 w-[15%]">Folio PBO</th>
+                      <th className="py-1.5 px-2.5 w-[25%]">Tickets Involucrados</th>
+                      <th className="py-1.5 px-2.5 w-[20%]">Nuevo Ticket</th>
+                      <th className="py-1.5 px-2.5 w-[20%]">Estatus Calidad</th>
+                      <th className="py-1.5 px-2.5 w-[20%]">Estatus Logística</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-755">
+                    {matchingReprocesos.map((r, idx) => {
+                      const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
+                      return (
+                        <tr key={idx} className="hover:bg-indigo-50/20">
+                          <td className="py-1.5 px-2.5 font-bold text-slate-800">
+                            {r.id_pbo} <br />
+                            <span className="text-[9px] font-mono text-slate-500 font-normal">Lote: {pboInfo?.lote || '—'}</span>
+                          </td>
+                          <td className="py-1.5 px-2.5 font-mono text-[10px] whitespace-normal break-words">{r.tickets_originales_consumidos}</td>
+                          <td className="py-1.5 px-2.5 font-mono font-bold text-indigo-600">{r.nuevo_ticket_reprocesado}</td>
+                          <td className="py-1.5 px-2.5">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.estatus_calidad === 'Aprobado' ? 'bg-emerald-100 text-emerald-700' : r.estatus_calidad === 'Rechazado' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {r.estatus_calidad}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2.5">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.estatus_logistica === 'Confirmado' ? 'bg-emerald-100 text-emerald-700' : r.estatus_logistica === 'Inconsistencia' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {r.estatus_logistica}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

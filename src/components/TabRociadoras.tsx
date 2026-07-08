@@ -1,5 +1,5 @@
-import React from 'react';
-import { Pipette, Paintbrush, RefreshCw } from 'lucide-react';
+import React, { useState } from 'react';
+import { Pipette, Paintbrush, RefreshCw, Trash2, Clock, Check, Plus } from 'lucide-react';
 import { IdentificacionRociadoras } from '../types';
 
 interface TabRociadorasProps {
@@ -13,13 +13,14 @@ const MAQUINAS_L3 = ['31', '32', '33', '34', '35', '36', '37', '38'];
 
 // Predefined colors for fast picking
 const COLOR_PRESETS = [
-  { name: 'Rojo', hex: '#EF4444', textClass: 'text-red-600 bg-red-50' },
-  { name: 'Azul', hex: '#3B82F6', textClass: 'text-blue-600 bg-blue-50' },
-  { name: 'Verde', hex: '#10B981', textClass: 'text-emerald-600 bg-emerald-50' },
-  { name: 'Amarillo', hex: '#FBBF24', textClass: 'text-amber-600 bg-amber-50' },
-  { name: 'Naranja', hex: '#F97316', textClass: 'text-orange-600 bg-orange-50' },
-  { name: 'Negro', hex: '#1E293B', textClass: 'text-slate-800 bg-slate-100' },
-  { name: 'Blanco', hex: '#F8FAFC', textClass: 'text-slate-500 bg-slate-50 border border-slate-200' },
+  { name: 'Rojo', hex: '#EF4444', textClass: 'text-white' },
+  { name: 'Azul', hex: '#3B82F6', textClass: 'text-white' },
+  { name: 'Verde', hex: '#10B981', textClass: 'text-white' },
+  { name: 'Amarillo', hex: '#EAB308', textClass: 'text-slate-900' },
+  { name: 'Naranja', hex: '#F97316', textClass: 'text-white' },
+  { name: 'Negro', hex: '#1E293B', textClass: 'text-white' },
+  { name: 'Morado', hex: '#8B5CF6', textClass: 'text-white' },
+  { name: 'Marrón', hex: '#78350F', textClass: 'text-white' }
 ];
 
 export default function TabRociadoras({
@@ -28,113 +29,202 @@ export default function TabRociadoras({
   editable
 }: TabRociadorasProps) {
 
-  // Retrieve current color for a machine
-  const getColorForMachine = (linea: string, maquina: string): string => {
-    const found = rociadoras.find(r => r.linea === linea && r.maquina === maquina);
-    return found ? found.color : '';
+  // Current line hours (defaults to current time)
+  const getInitialTime = () => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   };
 
-  // Update color
-  const setMachineColor = (linea: string, maquina: string, color: string) => {
+  const [horaL1, setHoraL1] = useState(getInitialTime());
+  const [horaL3, setHoraL3] = useState(getInitialTime());
+
+  // Retrieve all checks for a machine
+  const getChecksForMachine = (linea: string, maquina: string): IdentificacionRociadoras[] => {
+    return rociadoras.filter(r => r.linea === linea && r.maquina === maquina);
+  };
+
+  // Toggle color preset check at the current line hour
+  const togglePresetColor = (linea: string, maquina: string, colorName: string) => {
     if (!editable) return;
-    const existingIndex = rociadoras.findIndex(r => r.linea === linea && r.maquina === maquina);
+    const lineHour = linea === 'Linea 1' ? horaL1 : horaL3;
     
-    let updated = [...rociadoras];
-    if (color.trim() === '') {
-      // Remove if cleared
-      if (existingIndex !== -1) {
-        updated.splice(existingIndex, 1);
-      }
+    // Check if check exists at exact hour and color
+    const existingIndex = rociadoras.findIndex(
+      r => r.linea === linea && r.maquina === maquina && r.color.toLowerCase() === colorName.toLowerCase() && r.hora === lineHour
+    );
+
+    if (existingIndex !== -1) {
+      // Remove it
+      const updated = rociadoras.filter((_, idx) => idx !== existingIndex);
+      onChangeRociadoras(updated);
     } else {
-      if (existingIndex !== -1) {
-        updated[existingIndex] = { ...updated[existingIndex], color };
-      } else {
-        updated.push({ linea, maquina, color });
-      }
+      // Add it
+      const updated = [
+        ...rociadoras,
+        { linea, maquina, color: colorName, hora: lineHour }
+      ];
+      onChangeRociadoras(updated);
     }
+  };
+
+  // Add custom color for a machine at the current line hour
+  const addCustomColor = (linea: string, maquina: string, colorName: string) => {
+    if (!editable || !colorName.trim()) return;
+    const lineHour = linea === 'Linea 1' ? horaL1 : horaL3;
+
+    // Avoid duplicate check for same hour and color
+    const exists = rociadoras.some(
+      r => r.linea === linea && r.maquina === maquina && r.color.toLowerCase() === colorName.trim().toLowerCase() && r.hora === lineHour
+    );
+
+    if (!exists) {
+      const updated = [
+        ...rociadoras,
+        { linea, maquina, color: colorName.trim(), hora: lineHour }
+      ];
+      onChangeRociadoras(updated);
+    }
+  };
+
+  // Delete a specific check for a machine
+  const removeCheckValue = (linea: string, maquina: string, checkIndex: number) => {
+    if (!editable) return;
+    const machineChecks = rociadoras.filter(r => r.linea === linea && r.maquina === maquina);
+    if (checkIndex < 0 || checkIndex >= machineChecks.length) return;
+    
+    const targetCheck = machineChecks[checkIndex];
+    const updated = rociadoras.filter(r => r !== targetCheck);
     onChangeRociadoras(updated);
   };
 
   const clearAllColors = () => {
     if (!editable) return;
-    if (window.confirm('¿Está seguro de limpiar todos los colores registrados de las rociadoras?')) {
+    if (window.confirm('¿Está seguro de limpiar todos los registros de color de las rociadoras?')) {
       onChangeRociadoras([]);
     }
   };
 
   const renderMachineCard = (linea: string, maquina: string) => {
-    const currentColor = getColorForMachine(linea, maquina);
-    
-    // Find preset hex if matching
-    const matchedPreset = COLOR_PRESETS.find(
-      p => p.name.toLowerCase() === currentColor.trim().toLowerCase()
-    );
-    const circleBg = matchedPreset ? matchedPreset.hex : (currentColor ? '#6366F1' : '#E2E8F0');
+    const checks = getChecksForMachine(linea, maquina);
+    const lineHour = linea === 'Linea 1' ? horaL1 : horaL3;
 
     return (
       <div 
         key={`${linea}_${maquina}`}
-        className={`bg-slate-50/50 rounded-2xl border p-4 transition-all flex flex-col justify-between ${
-          currentColor ? 'border-indigo-200 bg-indigo-50/5 shadow-xs' : 'border-slate-200'
+        className={`bg-white rounded-2xl border p-4 transition-all flex flex-col justify-between space-y-3.5 shadow-xs ${
+          checks.length > 0 ? 'border-indigo-150 bg-indigo-50/5' : 'border-slate-200'
         }`}
       >
-        <div className="flex items-center justify-between mb-3">
+        {/* Card Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
           <div className="flex items-center gap-2">
-            {/* Color Indicator Lamp */}
-            <span 
-              className="w-4 h-4 rounded-full shadow-inner transition-all duration-300" 
-              style={{ backgroundColor: circleBg }}
-            />
+            <span className={`w-2.5 h-2.5 rounded-full ${checks.length > 0 ? 'bg-indigo-600 animate-pulse' : 'bg-slate-350'}`} />
             <span className="font-bold text-slate-800 text-sm">Máquina {maquina}</span>
           </div>
-          <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-sm">
-            {linea}
+          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-sm uppercase tracking-wider">
+            {linea === 'Linea 1' ? 'L1' : 'L3'}
           </span>
         </div>
 
-        {/* Preset colors button line */}
-        {editable ? (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-1">
-              {COLOR_PRESETS.map((preset) => (
-                <button
-                  key={preset.name}
-                  onClick={() => setMachineColor(linea, maquina, preset.name)}
-                  className={`text-[10px] px-2 py-0.5 rounded-sm transition-all font-medium cursor-pointer ${
-                    currentColor.toLowerCase() === preset.name.toLowerCase()
-                      ? 'ring-1 ring-offset-1 ring-indigo-500 scale-105 opacity-100 font-bold'
-                      : 'opacity-60 hover:opacity-100'
-                  }`}
-                  style={{ backgroundColor: preset.hex, color: preset.name === 'Blanco' || preset.name === 'Amarillo' ? '#1E293B' : '#FFFFFF' }}
-                >
-                  {preset.name}
-                </button>
-              ))}
+        {/* Visual List of Active Checks on this machine */}
+        <div className="space-y-1.5 min-h-[40px]">
+          {checks.length === 0 ? (
+            <div className="text-center py-2.5">
+              <p className="text-xs text-slate-400 italic">Sin registros de color</p>
             </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {checks.map((chk, idx) => {
+                const matchedPreset = COLOR_PRESETS.find(
+                  p => p.name.toLowerCase() === chk.color.trim().toLowerCase()
+                );
+                const circleBg = matchedPreset ? matchedPreset.hex : '#A855F7'; // Purple fallback for custom
 
-            {/* Manual Text Input Override */}
-            <div className="relative">
-              <input
-                type="text"
-                disabled={!editable}
-                value={currentColor}
-                onChange={(e) => setMachineColor(linea, maquina, e.target.value)}
-                placeholder="Escriba otro color..."
-                className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg py-1.5 pl-8 pr-2.5 text-xs outline-hidden transition-all"
-              />
-              <Paintbrush className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                return (
+                  <div 
+                    key={idx} 
+                    className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-150 pl-1.5 pr-1 py-0.5 rounded-md text-[11px] font-medium text-slate-700 shadow-xs"
+                  >
+                    <span 
+                      className="w-2 h-2 rounded-full border border-slate-300" 
+                      style={{ backgroundColor: circleBg }}
+                    />
+                    <span>{chk.color}</span>
+                    <span className="text-slate-400 text-[10px]">({chk.hora})</span>
+                    {editable && (
+                      <button
+                        onClick={() => removeCheckValue(linea, maquina, idx)}
+                        className="p-0.5 text-rose-500 hover:bg-rose-50 rounded cursor-pointer transition-colors ml-0.5"
+                        title="Eliminar registro"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Quick Color Presets Buttons */}
+        {editable && (
+          <div className="space-y-1.5 pt-2 border-t border-slate-100">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Seleccionar Color preset:</span>
+            <div className="grid grid-cols-4 gap-1.5">
+              {COLOR_PRESETS.map(preset => {
+                const isChecked = checks.some(
+                  c => c.color.toLowerCase() === preset.name.toLowerCase() && c.hora === lineHour
+                );
+
+                return (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => togglePresetColor(linea, maquina, preset.name)}
+                    className={`relative w-full h-8 rounded-lg cursor-pointer flex items-center justify-center transition-all duration-200 border hover:scale-105 active:scale-95 ${
+                      isChecked 
+                        ? 'ring-2 ring-indigo-500 ring-offset-1 border-transparent shadow-md' 
+                        : 'border-slate-200 shadow-xs'
+                    }`}
+                    style={{ backgroundColor: preset.hex }}
+                    title={`Click para alternar ${preset.name} a las ${lineHour}`}
+                  >
+                    {isChecked ? (
+                      <Check className={`w-4 h-4 font-bold ${preset.textClass}`} />
+                    ) : (
+                      <span className={`text-[9px] font-extrabold select-none opacity-85 ${preset.textClass}`}>
+                        {preset.name.substring(0, 3)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
-        ) : (
-          <div className="bg-white rounded-lg p-2.5 border border-slate-100 text-center">
-            {currentColor ? (
-              <span className="text-sm font-bold text-slate-800 flex items-center justify-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: circleBg }} />
-                {currentColor}
-              </span>
-            ) : (
-              <span className="text-xs text-slate-400 italic">No especificado</span>
-            )}
+        )}
+
+        {/* Custom Color Input */}
+        {editable && (
+          <div className="pt-2 border-t border-slate-50">
+            <div className="flex items-center gap-1">
+              <Paintbrush className="w-3 h-3 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Otro color + Enter"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const target = e.currentTarget;
+                    const val = target.value.trim();
+                    if (val) {
+                      addCustomColor(linea, maquina, val);
+                      target.value = ''; // Reset input
+                    }
+                  }
+                }}
+                className="bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-2 py-1 text-xs flex-1 outline-hidden"
+              />
+            </div>
           </div>
         )}
       </div>
@@ -144,7 +234,7 @@ export default function TabRociadoras({
   return (
     <div className="space-y-8">
       {/* HEADER SECTION */}
-      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-6">
+      <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="bg-indigo-50 p-2.5 rounded-2xl text-indigo-600">
@@ -158,7 +248,7 @@ export default function TabRociadoras({
           {editable && rociadoras.length > 0 && (
             <button
               onClick={clearAllColors}
-              className="flex items-center gap-1 text-xs font-semibold border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg transition-all cursor-pointer"
+              className="flex items-center gap-1 text-xs font-semibold border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg transition-all cursor-pointer shrink-0 shadow-xs"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               Limpiar Todo
@@ -171,28 +261,60 @@ export default function TabRociadoras({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* LINEA 1 */}
-        <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-6">
-          <div className="border-b border-slate-100 pb-3 mb-4">
-            <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-              <span className="w-2.5 h-5 bg-indigo-600 rounded-xs" />
-              LÍNEA 1
-            </h3>
-            <p className="text-xs text-slate-400">Rociadoras activas en envasadoras de Línea 1.</p>
+        <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-6 flex flex-col h-full">
+          <div className="border-b border-slate-100 pb-3 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <span className="w-2.5 h-5 bg-indigo-600 rounded-xs" />
+                LÍNEA 1
+              </h3>
+              <p className="text-xs text-slate-400">Rociadoras activas de Línea 1.</p>
+            </div>
+            
+            {/* General Line Time input */}
+            <div className="flex items-center gap-2 bg-slate-50 pl-2.5 pr-2 py-1.5 rounded-xl border border-slate-150 shadow-2xs self-start sm:self-auto">
+              <Clock className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Hora Inspección L1:</span>
+              <input
+                type="time"
+                disabled={!editable}
+                value={horaL1}
+                onChange={(e) => setHoraL1(e.target.value)}
+                className="bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-1.5 py-0.5 text-xs text-slate-800 font-bold outline-hidden w-[75px]"
+              />
+            </div>
           </div>
+          
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {MAQUINAS_L1.map(mq => renderMachineCard('Linea 1', mq))}
           </div>
         </div>
 
         {/* LINEA 3 */}
-        <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-6">
-          <div className="border-b border-slate-100 pb-3 mb-4">
-            <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-              <span className="w-2.5 h-5 bg-indigo-600 rounded-xs" />
-              LÍNEA 3
-            </h3>
-            <p className="text-xs text-slate-400">Rociadoras activas en envasadoras de Línea 3.</p>
+        <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-6 flex flex-col h-full">
+          <div className="border-b border-slate-100 pb-3 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <span className="w-2.5 h-5 bg-indigo-600 rounded-xs" />
+                LÍNEA 3
+              </h3>
+              <p className="text-xs text-slate-400">Rociadoras activas de Línea 3.</p>
+            </div>
+            
+            {/* General Line Time input */}
+            <div className="flex items-center gap-2 bg-slate-50 pl-2.5 pr-2 py-1.5 rounded-xl border border-slate-150 shadow-2xs self-start sm:self-auto">
+              <Clock className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Hora Inspección L3:</span>
+              <input
+                type="time"
+                disabled={!editable}
+                value={horaL3}
+                onChange={(e) => setHoraL3(e.target.value)}
+                className="bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-1.5 py-0.5 text-xs text-slate-800 font-bold outline-hidden w-[75px]"
+              />
+            </div>
           </div>
+          
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {MAQUINAS_L3.map(mq => renderMachineCard('Linea 3', mq))}
           </div>

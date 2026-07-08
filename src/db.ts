@@ -9,7 +9,10 @@ import {
   ObservacionGeneral, 
   IdentificacionRociadoras, 
   Trazabilidad, 
-  Pendiente 
+  Pendiente,
+  LotePBO,
+  Paleta,
+  Reproceso
 } from './types';
 
 // Default analistas list
@@ -161,6 +164,29 @@ export const getPendientesActivos = async (): Promise<Pendiente[]> => {
   return pendientes.filter(p => p.estado === 'Pendiente');
 };
 
+export const parseTrazabilidadesList = (list: Trazabilidad[]): Trazabilidad[] => {
+  return list.map(t => {
+    let insp = t.tickets_inspeccionados || '';
+    let ret = t.tickets_retenidos || '';
+    if (!insp && !ret && t.ticket) {
+      if (t.ticket.includes('|')) {
+        const parts = t.ticket.split('|');
+        const inspPart = parts[0] || '';
+        const retPart = parts[1] || '';
+        insp = inspPart.replace('Insp:', '').trim();
+        ret = retPart.replace('Ret:', '').trim();
+      } else {
+        insp = t.ticket;
+      }
+    }
+    return {
+      ...t,
+      tickets_inspeccionados: insp,
+      tickets_retenidos: ret
+    };
+  });
+};
+
 export const getTrazabilidadActiva = async (): Promise<Trazabilidad[]> => {
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -172,7 +198,7 @@ export const getTrazabilidadActiva = async (): Promise<Trazabilidad[]> => {
         .order('id', { ascending: true });
       
       if (error) throw error;
-      return data || [];
+      return parseTrazabilidadesList(data || []);
     } catch (e) {
       console.error("Supabase error fetching active traceability", e);
     }
@@ -180,7 +206,7 @@ export const getTrazabilidadActiva = async (): Promise<Trazabilidad[]> => {
 
   // Fallback
   const list: Trazabilidad[] = getLocalData('trazabilidad');
-  return list.filter(t => t.estado === 'Pendiente');
+  return parseTrazabilidadesList(list.filter(t => t.estado === 'Pendiente'));
 };
 
 export const getUltimoReporteBorrador = async (): Promise<ReporteCompleto | null> => {
@@ -230,7 +256,7 @@ export const getUltimoReporteBorrador = async (): Promise<ReporteCompleto | null
         desviaciones: desviaciones || [],
         generales: generales || [],
         rociadoras: rociadoras || [],
-        trazabilidades_nuevas: trazabilidades_nuevas || [],
+        trazabilidades_nuevas: parseTrazabilidadesList(trazabilidades_nuevas || []),
         trazabilidades_resueltas: (trazabilidades_resueltas || []).map(r => r.id),
         pendientes_nuevos: pendientes_nuevos || [],
         pendientes_resueltos: (pendientes_resueltos || []).map(r => r.id)
@@ -270,7 +296,7 @@ export const getUltimoReporteBorrador = async (): Promise<ReporteCompleto | null
     desviaciones,
     generales,
     rociadoras,
-    trazabilidades_nuevas,
+    trazabilidades_nuevas: parseTrazabilidadesList(trazabilidades_nuevas),
     trazabilidades_resueltas,
     pendientes_nuevos,
     pendientes_resueltos
@@ -433,7 +459,9 @@ export const guardarReporteCompleto = async (
               orden: t.orden,
               lote: t.lote,
               defecto: t.defecto,
-              ticket: t.ticket,
+              ticket: t.ticket || (t.tickets_inspeccionados && t.tickets_retenidos ? `Insp: ${t.tickets_inspeccionados} | Ret: ${t.tickets_retenidos}` : t.tickets_inspeccionados || t.tickets_retenidos || ''),
+              tickets_inspeccionados: t.tickets_inspeccionados || null,
+              tickets_retenidos: t.tickets_retenidos || null,
               estado: 'Pendiente',
               obs: t.obs,
               reporte_creacion_id: activeId
@@ -671,7 +699,7 @@ export const getReportePorId = async (id: number): Promise<ReporteCompleto | nul
         desviaciones: desviaciones || [],
         generales: generales || [],
         rociadoras: rociadoras || [],
-        trazabilidades_nuevas: trazabilidades_nuevas || [],
+        trazabilidades_nuevas: parseTrazabilidadesList(trazabilidades_nuevas || []),
         trazabilidades_resueltas: (trazabilidades_resueltas || []).map(r => r.id),
         pendientes_nuevos: pendientes_nuevos || [],
         pendientes_resueltos: (pendientes_resueltos || []).map(r => r.id)
@@ -710,7 +738,7 @@ export const getReportePorId = async (id: number): Promise<ReporteCompleto | nul
     desviaciones,
     generales,
     rociadoras,
-    trazabilidades_nuevas,
+    trazabilidades_nuevas: parseTrazabilidadesList(trazabilidades_nuevas),
     trazabilidades_resueltas,
     pendientes_nuevos,
     pendientes_resueltos
@@ -829,5 +857,181 @@ CREATE TABLE IF NOT EXISTS identificacion_rociadoras (
     maquina TEXT NOT NULL,
     color TEXT
 );
+
+CREATE TABLE IF NOT EXISTS pbo_lotes (
+    id_pbo TEXT PRIMARY KEY,
+    producto TEXT NOT NULL,
+    formato TEXT NOT NULL,
+    lote TEXT NOT NULL,
+    orden TEXT NOT NULL,
+    fecha_produccion TEXT NOT NULL,
+    defecto_general TEXT NOT NULL,
+    cantidad_total_latas INTEGER NOT NULL,
+    ubicacion TEXT NOT NULL,
+    estatus_general TEXT NOT NULL,
+    medidas_correctivas TEXT,
+    causas TEXT,
+    usuario_registro TEXT NOT NULL,
+    creado_el TEXT NOT NULL,
+    fecha_registro TEXT,
+    turno_registro INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS pbo_paletas (
+    id TEXT PRIMARY KEY,
+    id_pbo TEXT NOT NULL REFERENCES pbo_lotes(id_pbo) ON DELETE CASCADE,
+    nro_ticket TEXT NOT NULL,
+    camadas_sueltas INTEGER NOT NULL,
+    defecto TEXT NOT NULL,
+    nca REAL NOT NULL,
+    estatus TEXT NOT NULL,
+    creado_el TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pbo_reprocesos (
+    id TEXT PRIMARY KEY,
+    id_pbo TEXT NOT NULL REFERENCES pbo_lotes(id_pbo) ON DELETE CASCADE,
+    tickets_originales_consumidos TEXT NOT NULL,
+    nuevo_ticket_reprocesado TEXT NOT NULL,
+    camadas_sueltas INTEGER NOT NULL,
+    estatus_calidad TEXT NOT NULL,
+    estatus_logistica TEXT NOT NULL,
+    observacion_laboratorio TEXT,
+    usuario_registro TEXT NOT NULL,
+    creado_el TEXT NOT NULL
+);
 `;
 };
+
+// ==========================================
+// PBO DATABASE ACTIONS
+// ==========================================
+
+export const getLotesPBO = async (): Promise<LotePBO[]> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('pbo_lotes')
+        .select('*')
+        .order('creado_el', { ascending: false });
+      if (!error && data) return data;
+    } catch (e) {
+      console.error("Supabase PBO Lotes error", e);
+    }
+  }
+  return getLocalData('pbo_lotes');
+};
+
+export const saveLotePBO = async (lote: LotePBO): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('pbo_lotes').upsert(lote);
+      if (!error) return;
+    } catch (e) {
+      console.error("Supabase Save Lote PBO error", e);
+    }
+  }
+  const lotes: LotePBO[] = getLocalData('pbo_lotes');
+  const index = lotes.findIndex(l => l.id_pbo === lote.id_pbo);
+  if (index !== -1) {
+    lotes[index] = lote;
+  } else {
+    lotes.push(lote);
+  }
+  setLocalData('pbo_lotes', lotes);
+};
+
+export const deleteLotePBO = async (id_pbo: string): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await Promise.all([
+        supabase.from('pbo_lotes').delete().eq('id_pbo', id_pbo),
+        supabase.from('pbo_paletas').delete().eq('id_pbo', id_pbo),
+        supabase.from('pbo_reprocesos').delete().eq('id_pbo', id_pbo)
+      ]);
+      return;
+    } catch (e) {
+      console.error("Supabase Delete Lote PBO error", e);
+    }
+  }
+  const lotes: LotePBO[] = getLocalData('pbo_lotes');
+  setLocalData('pbo_lotes', lotes.filter(l => l.id_pbo !== id_pbo));
+
+  const paletas: Paleta[] = getLocalData('pbo_paletas');
+  setLocalData('pbo_paletas', paletas.filter(p => p.id_pbo !== id_pbo));
+
+  const reprocesos: Reproceso[] = getLocalData('pbo_reprocesos');
+  setLocalData('pbo_reprocesos', reprocesos.filter(r => r.id_pbo !== id_pbo));
+};
+
+export const getPaletasPBO = async (): Promise<Paleta[]> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('pbo_paletas').select('*');
+      if (!error && data) return data;
+    } catch (e) {
+      console.error("Supabase PBO Paletas error", e);
+    }
+  }
+  return getLocalData('pbo_paletas');
+};
+
+export const savePaletasPBO = async (paletasToSave: Paleta[]): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('pbo_paletas').upsert(paletasToSave);
+      if (!error) return;
+    } catch (e) {
+      console.error("Supabase Save Paletas PBO error", e);
+    }
+  }
+  const paletas: Paleta[] = getLocalData('pbo_paletas');
+  paletasToSave.forEach(pToSave => {
+    const idx = paletas.findIndex(p => p.id === pToSave.id);
+    if (idx !== -1) {
+      paletas[idx] = pToSave;
+    } else {
+      paletas.push(pToSave);
+    }
+  });
+  setLocalData('pbo_paletas', paletas);
+};
+
+export const getReprocesosPBO = async (): Promise<Reproceso[]> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('pbo_reprocesos').select('*');
+      if (!error && data) return data;
+    } catch (e) {
+      console.error("Supabase PBO Reprocesos error", e);
+    }
+  }
+  return getLocalData('pbo_reprocesos');
+};
+
+export const saveReprocesoPBO = async (reproceso: Reproceso): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('pbo_reprocesos').upsert(reproceso);
+      if (!error) return;
+    } catch (e) {
+      console.error("Supabase Save Reproceso PBO error", e);
+    }
+  }
+  const reprocesos: Reproceso[] = getLocalData('pbo_reprocesos');
+  const index = reprocesos.findIndex(r => r.id === reproceso.id);
+  if (index !== -1) {
+    reprocesos[index] = reproceso;
+  } else {
+    reprocesos.push(reproceso);
+  }
+  setLocalData('pbo_reprocesos', reprocesos);
+};
+
