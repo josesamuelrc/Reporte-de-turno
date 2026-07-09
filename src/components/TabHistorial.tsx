@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { History, Eye, ArrowUpRight, CheckCircle2, FileEdit, Clock } from 'lucide-react';
+import { History, Eye, ArrowUpRight, CheckCircle2, FileEdit, Clock, Printer, Trash2 } from 'lucide-react';
 import { ReporteTurno } from '../types';
 import { getHistorialReportes } from '../db';
 
 interface TabHistorialProps {
   onLoadReporte: (id: number) => void;
+  onPrintReporte?: (id: number) => void;
+  onDeleteReporte?: (id: number) => void;
   currentReporteId?: number;
   refreshTrigger?: number;
 }
 
 export default function TabHistorial({
   onLoadReporte,
+  onPrintReporte,
+  onDeleteReporte,
   currentReporteId,
   refreshTrigger = 0
 }: TabHistorialProps) {
@@ -118,27 +122,44 @@ export default function TabHistorial({
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-center">
-                      <button
-                        onClick={() => onLoadReporte(rep.id!)}
-                        className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                          isActive 
-                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                            : isBorrador
-                              ? 'bg-amber-100 hover:bg-amber-200 text-amber-700'
-                              : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-100'
-                        }`}
-                        disabled={isActive}
-                      >
-                        {isBorrador ? (
-                          <>
-                            <FileEdit className="w-3.5 h-3.5" /> Editar
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="w-3.5 h-3.5" /> Cargar
-                          </>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => onLoadReporte(rep.id!)}
+                          className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+                            isActive 
+                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                              : isBorrador
+                                ? 'bg-amber-100 hover:bg-amber-200 text-amber-700'
+                                : 'bg-indigo-100 hover:bg-indigo-200 text-indigo-700'
+                          }`}
+                          disabled={isActive}
+                          title={isBorrador ? "Editar Borrador" : "Cargar Reporte"}
+                        >
+                          {isBorrador ? (
+                            <FileEdit className="w-3.5 h-3.5" />
+                          ) : (
+                            <Eye className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                        {!isBorrador && onPrintReporte && (
+                           <button
+                             onClick={() => onPrintReporte(rep.id!)}
+                             className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all cursor-pointer bg-emerald-100 hover:bg-emerald-200 text-emerald-700"
+                             title="Imprimir Resumen"
+                           >
+                             <Printer className="w-3.5 h-3.5" />
+                           </button>
                         )}
-                      </button>
+                        {onDeleteReporte && (
+                           <button
+                             onClick={() => onDeleteReporte(rep.id!)}
+                             className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all cursor-pointer bg-rose-100 hover:bg-rose-200 text-rose-700"
+                             title="Eliminar Reporte"
+                           >
+                             <Trash2 className="w-3.5 h-3.5" />
+                           </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

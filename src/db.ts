@@ -303,6 +303,28 @@ export const getUltimoReporteBorrador = async (): Promise<ReporteCompleto | null
   };
 };
 
+export const eliminarReporte = async (reporteId: number): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from('reporte_turno')
+        .delete()
+        .eq('id', reporteId);
+      if (error) throw error;
+      return;
+    } catch (e) {
+      console.error("Supabase error deleting report", e);
+      throw e;
+    }
+  }
+
+  // Fallback
+  let cabeceras: ReporteTurno[] = getLocalData('reporte_turno');
+  cabeceras = cabeceras.filter(c => c.id !== reporteId);
+  setLocalData('reporte_turno', cabeceras);
+};
+
 export const terminarReporte = async (reporteId: number): Promise<void> => {
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -340,6 +362,7 @@ export const guardarReporteCompleto = async (
     rociadoras,
     trazabilidades_nuevas,
     trazabilidades_resueltas,
+    trazabilidades_activas_modificadas,
     pendientes_nuevos,
     pendientes_resueltos
   } = reporteCompleto;
@@ -412,7 +435,17 @@ export const guardarReporteCompleto = async (
       if (productos.length > 0) {
         insertPromises.push(
           supabase.from('productos_turno').insert(
-            productos.map(p => ({ ...p, reporte_id: activeId }))
+            productos.map(p => ({
+              reporte_id: activeId,
+              codigo_sap: p.codigo_sap,
+              descripcion: p.descripcion,
+              orden: p.orden || null,
+              lote: p.lote,
+              cantidad: p.cantidad || null,
+              paletas: p.paletas || null,
+              camadas: p.camadas || null,
+              obs: p.obs
+            }))
           ) as any
         );
       }
@@ -420,7 +453,19 @@ export const guardarReporteCompleto = async (
       if (observaciones.length > 0) {
         insertPromises.push(
           supabase.from('producto_observacion').insert(
-            observaciones.map(o => ({ ...o, reporte_id: activeId }))
+            observaciones.map(o => ({
+              reporte_id: activeId,
+              codigo_sap: o.codigo_sap,
+              descripcion: o.descripcion,
+              orden: o.orden,
+              lote: o.lote,
+              defecto: o.defecto,
+              ticket: o.ticket,
+              nca: o.nca,
+              causa_raiz: o.causa_raiz,
+              acciones: o.acciones,
+              obs: o.obs
+            }))
           ) as any
         );
       }
@@ -428,7 +473,19 @@ export const guardarReporteCompleto = async (
       if (desviaciones.length > 0) {
         insertPromises.push(
           supabase.from('desviaciones_sin_retencion').insert(
-            desviaciones.map(d => ({ ...d, reporte_id: activeId }))
+            desviaciones.map(d => ({
+              reporte_id: activeId,
+              hora: d.hora || null,
+              codigo_sap: d.codigo_sap,
+              descripcion: d.descripcion,
+              lote: d.lote,
+              tipo: d.tipo || null,
+              defecto: d.defecto,
+              nca: d.nca,
+              paletas_afectadas: d.paletas_afectadas,
+              pruebas_funcionales: d.pruebas_funcionales,
+              observaciones: d.observaciones
+            }))
           ) as any
         );
       }
@@ -436,7 +493,11 @@ export const guardarReporteCompleto = async (
       if (generales.length > 0) {
         insertPromises.push(
           supabase.from('observaciones_generales').insert(
-            generales.map(g => ({ ...g, reporte_id: activeId }))
+            generales.map(g => ({
+              reporte_id: activeId,
+              tipo_evento: g.tipo_evento,
+              descripcion: g.descripcion
+            }))
           ) as any
         );
       }
@@ -444,7 +505,13 @@ export const guardarReporteCompleto = async (
       if (rociadoras.length > 0) {
         insertPromises.push(
           supabase.from('identificacion_rociadoras').insert(
-            rociadoras.map(r => ({ ...r, reporte_id: activeId }))
+            rociadoras.map(r => ({
+              reporte_id: activeId,
+              linea: r.linea,
+              maquina: r.maquina,
+              color: r.color,
+              hora: r.hora || null
+            }))
           ) as any
         );
       }
@@ -485,6 +552,25 @@ export const guardarReporteCompleto = async (
       }
 
       // 3. Resolver Trazabilidades y Pendientes
+      if (trazabilidades_activas_modificadas && trazabilidades_activas_modificadas.length > 0) {
+        trazabilidades_activas_modificadas.forEach(traz => {
+          if (traz.id) {
+            insertPromises.push(
+              supabase
+                .from('trazabilidad')
+                .update({
+                  tickets_inspeccionados: traz.tickets_inspeccionados,
+                  tickets_retenidos: traz.tickets_retenidos,
+                  obs: traz.obs,
+                  hacia_adelante: traz.hacia_adelante,
+                  hacia_atras: traz.hacia_atras
+                })
+                .eq('id', traz.id) as any
+            );
+          }
+        });
+      }
+
       if (trazabilidades_resueltas.length > 0) {
         insertPromises.push(
           supabase
@@ -503,11 +589,19 @@ export const guardarReporteCompleto = async (
         );
       }
 
-      await Promise.all(insertPromises);
+      const results = await Promise.all(insertPromises);
+      
+      for (const res of results) {
+        if (res && res.error) {
+          throw new Error(`Error insertando en tabla secundaria: ${res.error.message || JSON.stringify(res.error)}`);
+        }
+      }
+      
       return activeId;
 
-    } catch (e) {
-      console.error("Supabase guardado completo falló, usando local", e);
+    } catch (e: any) {
+      console.error("Supabase guardado completo falló", e);
+      throw new Error(`Error en base de datos Supabase: ${e.message || e}. Si has actualizado la aplicación recientemente, asegúrate de haber copiado y ejecutado las sentencias SQL (incluyendo los ALTER TABLE) en el SQL Editor de tu panel de Supabase (se encuentran en la pestaña Configuración).`);
     }
   }
 
@@ -601,6 +695,20 @@ export const guardarReporteCompleto = async (
     reporte_creacion_id: activeId
   }));
   
+  // Trace modificadas
+  if (trazabilidades_activas_modificadas) {
+    trazabilidades_activas_modificadas.forEach(traz => {
+      const idx = localTraz.findIndex(t => t.id === traz.id);
+      if (idx !== -1) {
+        localTraz[idx].tickets_inspeccionados = traz.tickets_inspeccionados;
+        localTraz[idx].tickets_retenidos = traz.tickets_retenidos;
+        localTraz[idx].obs = traz.obs;
+        localTraz[idx].hacia_adelante = traz.hacia_adelante;
+        localTraz[idx].hacia_atras = traz.hacia_atras;
+      }
+    });
+  }
+
   // Trace resueltas
   trazabilidades_resueltas.forEach(id => {
     const idx = localTraz.findIndex(t => t.id === id);
@@ -748,6 +856,53 @@ export const getReportePorId = async (id: number): Promise<ReporteCompleto | nul
 export const getSqlSchema = (): string => {
   return `-- SQL de inicialización para Supabase (Copia y pega esto en la sección "SQL Editor" de tu panel Supabase)
 
+-- ==========================================
+-- SCRIPT DE MIGRACIÓN (Si ya tienes las tablas creadas, corre solo esto para no borrar tus datos)
+-- ==========================================
+-- ALTER TABLE productos_turno ADD COLUMN IF NOT EXISTS orden TEXT;
+-- ALTER TABLE productos_turno ADD COLUMN IF NOT EXISTS paletas TEXT;
+-- ALTER TABLE productos_turno ADD COLUMN IF NOT EXISTS camadas TEXT;
+-- ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS tickets_inspeccionados TEXT;
+-- ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS tickets_retenidos TEXT;
+ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS hacia_adelante BOOLEAN DEFAULT FALSE;
+ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS hacia_atras BOOLEAN DEFAULT FALSE;
+ALTER TABLE pbo_paletas ALTER COLUMN nca TYPE TEXT;
+-- ALTER TABLE identificacion_rociadoras ADD COLUMN IF NOT EXISTS hora TEXT;
+-- ALTER TABLE desviaciones_sin_retencion ADD COLUMN IF NOT EXISTS hora TEXT;
+-- ALTER TABLE desviaciones_sin_retencion ADD COLUMN IF NOT EXISTS tipo TEXT;
+--
+-- -- SI NO TENÍAS LA TABLA DE DESVIACIONES SIN RETENCIÓN EN TU BASE DE DATOS ACTUAL, EJECUTA ESTO:
+-- CREATE TABLE IF NOT EXISTS desviaciones_sin_retencion (
+--     id SERIAL PRIMARY KEY,
+--     reporte_id INTEGER NOT NULL REFERENCES reporte_turno(id) ON DELETE CASCADE,
+--     hora TEXT,
+--     codigo_sap TEXT,
+--     descripcion TEXT,
+--     lote TEXT,
+--     tipo TEXT,
+--     defecto TEXT,
+--     nca TEXT,
+--     paletas_afectadas TEXT,
+--     pruebas_funcionales TEXT,
+--     observaciones TEXT
+-- );
+
+-- ==========================================
+-- RESETEO TOTAL (OPCIONAL)
+-- Si estás experimentando errores de guardado y no te importa perder los reportes actuales, 
+-- puedes borrar todas las tablas de reportes (sin borrar la información de PBO) ejecutando:
+--
+-- DROP TABLE IF EXISTS desviaciones_sin_retencion CASCADE;
+-- DROP TABLE IF EXISTS observaciones_generales CASCADE;
+-- DROP TABLE IF EXISTS identificacion_rociadoras CASCADE;
+-- DROP TABLE IF EXISTS pendientes CASCADE;
+-- DROP TABLE IF EXISTS trazabilidad CASCADE;
+-- DROP TABLE IF EXISTS producto_observacion CASCADE;
+-- DROP TABLE IF EXISTS productos_turno CASCADE;
+-- DROP TABLE IF EXISTS reporte_turno CASCADE;
+-- ==========================================
+
+
 CREATE TABLE IF NOT EXISTS analistas (
     id SERIAL PRIMARY KEY,
     nombre TEXT NOT NULL UNIQUE,
@@ -783,8 +938,11 @@ CREATE TABLE IF NOT EXISTS productos_turno (
     reporte_id INTEGER NOT NULL REFERENCES reporte_turno(id) ON DELETE CASCADE,
     codigo_sap TEXT,
     descripcion TEXT,
+    orden TEXT,
     lote TEXT,
     cantidad TEXT,
+    paletas TEXT,
+    camadas TEXT,
     obs TEXT
 );
 
@@ -814,6 +972,10 @@ CREATE TABLE IF NOT EXISTS trazabilidad (
     lote TEXT,
     defecto TEXT,
     ticket TEXT,
+    tickets_inspeccionados TEXT,
+    tickets_retenidos TEXT,
+    hacia_adelante BOOLEAN DEFAULT FALSE,
+    hacia_atras BOOLEAN DEFAULT FALSE,
     estado TEXT DEFAULT 'Pendiente',
     obs TEXT
 );
@@ -855,7 +1017,8 @@ CREATE TABLE IF NOT EXISTS identificacion_rociadoras (
     reporte_id INTEGER NOT NULL REFERENCES reporte_turno(id) ON DELETE CASCADE,
     linea TEXT NOT NULL,
     maquina TEXT NOT NULL,
-    color TEXT
+    color TEXT,
+    hora TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pbo_lotes (
@@ -883,7 +1046,7 @@ CREATE TABLE IF NOT EXISTS pbo_paletas (
     nro_ticket TEXT NOT NULL,
     camadas_sueltas INTEGER NOT NULL,
     defecto TEXT NOT NULL,
-    nca REAL NOT NULL,
+    nca TEXT NOT NULL,
     estatus TEXT NOT NULL,
     creado_el TEXT NOT NULL
 );
@@ -900,6 +1063,23 @@ CREATE TABLE IF NOT EXISTS pbo_reprocesos (
     usuario_registro TEXT NOT NULL,
     creado_el TEXT NOT NULL
 );
+
+-- Desactivar Seguridad de Fila (RLS) para permitir lectura/escritura pública con la key anónima de Supabase
+ALTER TABLE analistas DISABLE ROW LEVEL SECURITY;
+ALTER TABLE reporte_turno DISABLE ROW LEVEL SECURITY;
+ALTER TABLE productos_turno DISABLE ROW LEVEL SECURITY;
+ALTER TABLE producto_observacion DISABLE ROW LEVEL SECURITY;
+ALTER TABLE trazabilidad DISABLE ROW LEVEL SECURITY;
+ALTER TABLE desviaciones_sin_retencion DISABLE ROW LEVEL SECURITY;
+ALTER TABLE observaciones_generales DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pendientes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE identificacion_rociadoras DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pbo_lotes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pbo_paletas DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pbo_reprocesos DISABLE ROW LEVEL SECURITY;
+
+-- Recargar la caché del esquema de Supabase para que la API reconozca las nuevas tablas
+NOTIFY pgrst, 'reload schema';
 `;
 };
 

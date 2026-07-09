@@ -20,8 +20,10 @@ import {
   getUltimoReporteBorrador, 
   guardarReporteCompleto, 
   terminarReporte, 
+  eliminarReporte,
   getReportePorId, 
-  isSupabaseConnected 
+  isSupabaseConnected,
+  getLotesPBO
 } from './db';
 import { 
   ReporteTurno, 
@@ -105,11 +107,13 @@ export default function App() {
   const [rociadoras, setRociadoras] = useState<IdentificacionRociadoras[]>([]);
   const [trazabilidadesNuevas, setTrazabilidadesNuevas] = useState<Trazabilidad[]>([]);
   const [trazabilidadesResueltas, setTrazabilidadesResueltas] = useState<number[]>([]);
+  const [trazabilidadesHeredadasModificadas, setTrazabilidadesHeredadasModificadas] = useState<Trazabilidad[]>([]);
   const [pendientesNuevos, setPendientesNuevos] = useState<Pendiente[]>([]);
   const [pendientesResueltos, setPendientesResueltos] = useState<number[]>([]);
 
   // Trigger to update trace/issues lists
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [pboLotesCount, setPboLotesCount] = useState<number>(0);
 
   // Initialize dates
   const initFecha = () => {
@@ -154,6 +158,24 @@ export default function App() {
   useEffect(() => {
     loadInitialData();
   }, []);
+
+  // Load and count PBO lotes for the current shift
+  useEffect(() => {
+    const fetchPboCount = async () => {
+      try {
+        const allPbo = await getLotesPBO();
+        const count = allPbo.filter(
+          l => l.fecha_registro === cabecera.fecha && l.turno_registro === cabecera.turno
+        ).length;
+        setPboLotesCount(count);
+      } catch (err) {
+        console.error("Error fetching PBO count in App:", err);
+      }
+    };
+    if (cabecera.fecha) {
+      fetchPboCount();
+    }
+  }, [cabecera.fecha, cabecera.turno, refreshTrigger, activeModule]);
 
   // Load a complete report payload into the form states
   const cargarReporteEnPantalla = (payload: ReporteCompleto) => {
@@ -220,6 +242,44 @@ export default function App() {
     }
   };
 
+  const handlePrintReporteDesdeHistorial = async (id: number) => {
+    try {
+      const rep = await getReportePorId(id);
+      if (rep) {
+        cargarReporteEnPantalla(rep);
+        setActiveTab('resumen');
+        setTimeout(() => {
+          window.print();
+        }, 500);
+      } else {
+        alert(`No se encontró el reporte N°${id}.`);
+      }
+    } catch (err) {
+      console.error("Error preparing report for print", err);
+      alert("No se pudo cargar el reporte para imprimir.");
+    }
+  };
+
+  const handleDeleteReporte = async (id: number) => {
+    const confirm = window.confirm(`¿Está seguro que desea ELIMINAR PERMANENTEMENTE el reporte N°${id}? Esta acción no se puede deshacer.`);
+    if (!confirm) return;
+
+    try {
+      await eliminarReporte(id);
+      alert(`Reporte N°${id} eliminado con éxito.`);
+      setRefreshTrigger(prev => prev + 1);
+      
+      // If the deleted report is the active one, reset
+      if (reporteId === id) {
+        resetearNuevoReporte();
+        setActiveTab('general');
+      }
+    } catch (err: any) {
+      console.error("Error deleting report", err);
+      alert(`Ocurrió un error al eliminar: ${err.message || err}`);
+    }
+  };
+
   // Compile full object payload for database saving
   const recopilarPayload = (): ReporteCompleto => {
     return {
@@ -232,6 +292,7 @@ export default function App() {
       rociadoras,
       trazabilidades_nuevas: trazabilidadesNuevas,
       trazabilidades_resueltas: trazabilidadesResueltas,
+      trazabilidades_activas_modificadas: trazabilidadesHeredadasModificadas,
       pendientes_nuevos: pendientesNuevos,
       pendientes_resueltos: pendientesResueltos
     };
@@ -309,138 +370,6 @@ export default function App() {
     
     resetearNuevoReporte();
     setActiveTab('general');
-  };
-
-  // Action: Fill with comprehensive, high-fidelity sample test data representing the user's exactly requested report scenario
-  const handleLlenarDatosPrueba = () => {
-    // Fill out cabecera
-    setCabecera({
-      fecha: '2026-06-25',
-      grupo: 'A',
-      analista: 'BRUNO MUÑOZ',
-      turno: 2,
-      temp_cumple: true,
-      hum_cumple: true,
-      caida_tension: 'Sin caídas de tensión',
-      observaciones_ambiente: '',
-      estado: 'Borrador'
-    });
-
-    // Fill out products
-    setProductos([
-      {
-        codigo_sap: 'Y00386',
-        descripcion: 'Rockstar sleek',
-        lote: 'NR6J252A3',
-        cantidad: '34 PAL',
-        obs: 'Producción conforme'
-      },
-      {
-        codigo_sap: 'Y00108',
-        descripcion: 'Solera Light',
-        lote: 'NR6J252B3',
-        cantidad: '34 PAL',
-        obs: 'Producción conforme'
-      }
-    ]);
-
-    // Fill out observations (retenciones)
-    setObservaciones([
-      {
-        codigo_sap: 'Y00255',
-        descripcion: 'Golden Manzana',
-        orden: '70161139',
-        lote: 'NR6J252A3',
-        defecto: 'Exposición Metálica por Rociadora 32 y Decoración Defectuosa',
-        ticket: '2,3',
-        nca: '2 PAL',
-        causa_raiz: 'Falla técnica en sistema de rociado de máquina 32',
-        acciones: 'Se rerociaron y aprobaron en el turno las paletas 5,6,7,8,9',
-        obs: 'Trazabilidad Realizada:\n\n- PAL 1,2,3,4,9,10,11,12 ✅'
-      }
-    ]);
-
-    // Fill out desviaciones sin retencion
-    setDesviaciones([
-      {
-        hora: '21:30',
-        codigo_sap: 'Y00108',
-        descripcion: 'Solera Light',
-        lote: 'L1234',
-        tipo: 'Formación',
-        defecto: 'Marca de formación cumple NCA',
-        nca: 'N/A',
-        paletas_afectadas: '0',
-        pruebas_funcionales: 'Conforme',
-        observaciones: 'Monitoreo preventivo continuo.'
-      }
-    ]);
-
-    // Fill out observaciones generales
-    setGenerales([
-      {
-        tipo_evento: 'OPERACION / LINEAS',
-        descripcion: 'Se arrancan las líneas a las 9:00 p.m aprox por contingencia de tubería rota qué alimenta a las torres de enfriamiento. Se observa afectación en el almacén de producto terminado, moviéndose las paletas afectadas a las filas G0,G4,G5,G6,G7,O4,O8,O9.'
-      },
-      {
-        tipo_evento: 'PROCESO / FLEJES',
-        descripcion: 'Se envía correo de metodología manual de ajuste de flejes en linea con regleta de flejadora.'
-      },
-      {
-        tipo_evento: 'CALIDAD / AVISO C3',
-        descripcion: 'Se crea aviso C3 interno por contaminación interna de Rockstar Lote NR6J242A3'
-      },
-      {
-        tipo_evento: 'REVISION / REPALETIZADO',
-        descripcion: 'SKU: Pilsen sleek - Orden: 70160904 - Lote: NR6J161B3 - #Ticket: 10 CAM - Total: 10 CAM'
-      },
-      {
-        tipo_evento: 'REVISION / REPALETIZADO 2',
-        descripcion: 'SKU: Pilsen Sleek - Orden: 70160783 - Lote: NR6J191A3 - #Ticket: 8,9,6,11 - Total: 4 PAL'
-      },
-      {
-        tipo_evento: 'REVISION / REROCIADO',
-        descripcion: 'SKU: Rockstar - Orden: 70158496 - Lote: NR6B141B3 - #Ticket: 5,9,6, Resto de 10 camadas. - Total: 3 PAL + 10 CAM'
-      },
-      {
-        tipo_evento: 'RESUMEN REVISION',
-        descripcion: 'Total General: 7 PAL + 20 CAM'
-      }
-    ]);
-
-    // Fill out rociadoras
-    setRociadoras([
-      { linea: 'L3', maquina: '32', color: 'Rojo' },
-      { linea: 'L3', maquina: '34', color: 'Verde' },
-      { linea: 'L1', maquina: '12', color: 'Azul' }
-    ]);
-
-    // Fill out trace list (trazabilidades nuevas)
-    setTrazabilidadesNuevas([
-      {
-        tipo: 'Hacia adelante',
-        codigo_sap: 'Y00386',
-        descripcion: 'Trazabilidad de empaque',
-        orden: '70161139',
-        lote: 'NR6J252A3',
-        defecto: 'Exposición Metálica',
-        ticket: '2,3',
-        estado: 'Finalizada',
-        obs: 'PAL 1,2,3,4,9,10,11,12 ✅'
-      }
-    ]);
-
-    // Fill out pending tasks (pendientes_nuevos)
-    setPendientesNuevos([
-      {
-        descripcion: 'Prueba de roce',
-        responsable: 'Siguiente Turno',
-        observaciones: 'Verificar al inicio de la jornada',
-        estado: 'Pendiente'
-      }
-    ]);
-
-    alert('¡Formulario auto-completado con datos de prueba realistas! Puede revisar todas las pestañas y exportar.');
   };
 
   return (
@@ -559,7 +488,7 @@ export default function App() {
               <div className="text-xs">
                 <span className="block font-bold text-rose-400 uppercase text-[10px] tracking-wider">Bajo Observación</span>
                 <span className="font-extrabold text-rose-700 block text-sm mt-0.5">
-                  {observaciones.length} Lote(s) Retenido(s)
+                  {pboLotesCount} Lote(s) Retenido(s)
                 </span>
                 <span className="text-rose-500/75 block text-[10px] mt-0.5">Requieren inspección en laboratorio</span>
               </div>
@@ -575,7 +504,7 @@ export default function App() {
                 <span className="font-extrabold text-amber-700 block text-sm mt-0.5">
                   {desviaciones.length} Desviación(es) Menor(es)
                 </span>
-                <span className="text-amber-600 block text-[10px] mt-0.5">Registradas en envasadoras</span>
+                <span className="text-amber-600 block text-[10px] mt-0.5">No generaron retencion</span>
               </div>
             </div>
 
@@ -634,6 +563,14 @@ export default function App() {
               }`}
             >
               <History className="w-3.5 h-3.5" /> Historial de Turnos
+            </button>
+            <button
+              onClick={() => setActiveTab('configuracion')}
+              className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'configuracion' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5" /> Configuración
             </button>
           </div>
         </nav>
@@ -726,6 +663,8 @@ export default function App() {
                     onChangeTrazabilidadesNuevas={setTrazabilidadesNuevas}
                     trazabilidadesResueltas={trazabilidadesResueltas}
                     onChangeTrazabilidadesResueltas={setTrazabilidadesResueltas}
+                    trazabilidadesHeredadasModificadas={trazabilidadesHeredadasModificadas}
+                    onChangeTrazabilidadesHeredadasModificadas={setTrazabilidadesHeredadasModificadas}
                     pendientesNuevos={pendientesNuevos}
                     onChangePendientesNuevos={setPendientesNuevos}
                     pendientesResueltos={pendientesResueltos}
@@ -752,6 +691,8 @@ export default function App() {
                 {activeTab === 'historial' && (
                   <TabHistorial
                     onLoadReporte={handleLoadReportePorId}
+                    onPrintReporte={handlePrintReporteDesdeHistorial}
+                    onDeleteReporte={handleDeleteReporte}
                     currentReporteId={reporteId}
                     refreshTrigger={refreshTrigger}
                   />
@@ -794,14 +735,6 @@ export default function App() {
 
               {editable && (
                 <>
-                  <button
-                    onClick={handleLlenarDatosPrueba}
-                    className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md shadow-amber-100 transition-all"
-                    title="Llena todo el formulario con datos de prueba realistas"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    Cargar Datos de Prueba
-                  </button>
                   <button
                     onClick={() => handleGuardarAvance(true)}
                     className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md shadow-indigo-100 transition-all"

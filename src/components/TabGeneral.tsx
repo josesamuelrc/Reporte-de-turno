@@ -127,14 +127,58 @@ export default function TabGeneral({
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1">
               <Zap className="w-3.5 h-3.5 text-amber-500" /> Caídas de Tensión
             </label>
-            <input
-              type="text"
-              disabled={!editable}
-              value={cabecera.caida_tension || ''}
-              onChange={(e) => onChangeCabecera({ caida_tension: e.target.value })}
-              placeholder="Ej. Sin caídas de tensión..."
-              className="w-full bg-slate-50 disabled:bg-slate-100/60 disabled:text-slate-400 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2.5 text-sm transition-all outline-hidden"
-            />
+            <div className="flex flex-col gap-2 mt-2">
+              <div className="flex items-center gap-4">
+                <label className="inline-flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-700">
+                  <input
+                    type="radio"
+                    name="caida_tension_radio"
+                    disabled={!editable}
+                    checked={cabecera.caida_tension === 'No' || cabecera.caida_tension === 'Sin caídas de tensión' || !cabecera.caida_tension}
+                    onChange={() => onChangeCabecera({ caida_tension: 'No' })}
+                    className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                  />
+                  No
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-700">
+                  <input
+                    type="radio"
+                    name="caida_tension_radio"
+                    disabled={!editable}
+                    checked={cabecera.caida_tension !== 'No' && cabecera.caida_tension !== 'Sin caídas de tensión' && !!cabecera.caida_tension}
+                    onChange={() => onChangeCabecera({ caida_tension: 'Sí (00:00 - 00:00)' })}
+                    className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                  />
+                  Sí
+                </label>
+              </div>
+
+              {cabecera.caida_tension !== 'No' && cabecera.caida_tension !== 'Sin caídas de tensión' && !!cabecera.caida_tension && (
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="time"
+                    disabled={!editable}
+                    value={cabecera.caida_tension.match(/Sí \((.*?) -/)?.[1] || ''}
+                    onChange={(e) => {
+                      const fin = cabecera.caida_tension.match(/- (.*?)\)/)?.[1] || '';
+                      onChangeCabecera({ caida_tension: `Sí (${e.target.value} - ${fin})` });
+                    }}
+                    className="w-full bg-slate-50 disabled:bg-slate-100/60 disabled:text-slate-400 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2 text-xs transition-all outline-hidden"
+                  />
+                  <span className="text-slate-400 text-xs font-medium">a</span>
+                  <input
+                    type="time"
+                    disabled={!editable}
+                    value={cabecera.caida_tension.match(/- (.*?)\)/)?.[1] || ''}
+                    onChange={(e) => {
+                      const ini = cabecera.caida_tension.match(/Sí \((.*?) -/)?.[1] || '';
+                      onChangeCabecera({ caida_tension: `Sí (${ini} - ${e.target.value})` });
+                    }}
+                    className="w-full bg-slate-50 disabled:bg-slate-100/60 disabled:text-slate-400 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2 text-xs transition-all outline-hidden"
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-col gap-3 justify-center">

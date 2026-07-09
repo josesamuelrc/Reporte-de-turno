@@ -11,6 +11,8 @@ interface TabSeguimientoProps {
   onChangeTrazabilidadesNuevas: (traz: Trazabilidad[]) => void;
   trazabilidadesResueltas: number[]; // Array of trace IDs resolved in current report
   onChangeTrazabilidadesResueltas: (ids: number[]) => void;
+  trazabilidadesHeredadasModificadas?: Trazabilidad[];
+  onChangeTrazabilidadesHeredadasModificadas?: (traz: Trazabilidad[]) => void;
   pendientesNuevos: Pendiente[];
   onChangePendientesNuevos: (pend: Pendiente[]) => void;
   pendientesResueltos: number[]; // Array of pending IDs resolved in current report
@@ -24,6 +26,8 @@ export default function TabSeguimiento({
   onChangeTrazabilidadesNuevas,
   trazabilidadesResueltas,
   onChangeTrazabilidadesResueltas,
+  trazabilidadesHeredadasModificadas,
+  onChangeTrazabilidadesHeredadasModificadas,
   pendientesNuevos,
   onChangePendientesNuevos,
   pendientesResueltos,
@@ -61,13 +65,41 @@ export default function TabSeguimiento({
     };
   }, [refreshTrigger]);
 
-  // Handle checking/unchecking a traceability item
-  const toggleTrazabilidadResuelta = (id: number) => {
+  // Handle editing inherited trazabilidades
+  const handleEditHeredada = (id: number, field: keyof Trazabilidad, value: any) => {
     if (!editable) return;
-    if (trazabilidadesResueltas.includes(id)) {
-      onChangeTrazabilidadesResueltas(trazabilidadesResueltas.filter(x => x !== id));
-    } else {
-      onChangeTrazabilidadesResueltas([...trazabilidadesResueltas, id]);
+    
+    setDbTrazabilidades(prev => prev.map(t => {
+      if (t.id === id) {
+        const updated = { ...t, [field]: value };
+        
+        // Auto-resolve logic
+        const bothChecked = updated.hacia_adelante && updated.hacia_atras;
+        const currentlyResolved = trazabilidadesResueltas.includes(id);
+        
+        if (bothChecked && !currentlyResolved) {
+           onChangeTrazabilidadesResueltas([...trazabilidadesResueltas, id]);
+        } else if (!bothChecked && currentlyResolved) {
+           onChangeTrazabilidadesResueltas(trazabilidadesResueltas.filter(rid => rid !== id));
+        }
+        
+        return updated;
+      }
+      return t;
+    }));
+    
+    if (onChangeTrazabilidadesHeredadasModificadas && trazabilidadesHeredadasModificadas) {
+      const existingIdx = trazabilidadesHeredadasModificadas.findIndex(t => t.id === id);
+      if (existingIdx >= 0) {
+        const updatedList = [...trazabilidadesHeredadasModificadas];
+        updatedList[existingIdx] = { ...updatedList[existingIdx], [field]: value };
+        onChangeTrazabilidadesHeredadasModificadas(updatedList);
+      } else {
+        const original = dbTrazabilidades.find(t => t.id === id);
+        if (original) {
+          onChangeTrazabilidadesHeredadasModificadas([...trazabilidadesHeredadasModificadas, { ...original, [field]: value }]);
+        }
+      }
     }
   };
 
@@ -170,6 +202,119 @@ export default function TabSeguimiento({
 
   return (
     <div className="space-y-8">
+      {/* SECCION TRAZABILIDADES ACTIVAS (HERENCIA) */}
+      <div className="w-full">
+        <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-5 flex flex-col h-full min-h-[300px]">
+          <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-3">
+            <ArrowRightLeft className="w-5 h-5 text-indigo-600" />
+            <div>
+              <h2 className="text-base font-bold text-slate-800">Trazabilidades Activas (Herencia)</h2>
+              <p className="text-xs text-slate-500">Trazabilidades iniciadas en turnos anteriores. Marque hacia adelante y hacia atrás para finalizarlas.</p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead className="bg-slate-50 text-slate-600 font-bold uppercase sticky top-0 z-10 border-b border-slate-200">
+                <tr>
+                  <th className="py-2.5 px-3 text-center w-[6%] leading-tight">Hacia<br/>Adelante</th>
+                  <th className="py-2.5 px-3 text-center w-[6%] leading-tight">Hacia<br/>Atrás</th>
+                  <th className="py-2.5 px-3 w-[10%]">Código SAP</th>
+                  <th className="py-2.5 px-3 w-[16%]">Descripción</th>
+                  <th className="py-2.5 px-3 w-[8%]">Orden</th>
+                  <th className="py-2.5 px-3 w-[8%]">Lote</th>
+                  <th className="py-2.5 px-3 w-[10%]">Defecto</th>
+                  <th className="py-2.5 px-3 w-[12%]">Inspeccionados</th>
+                  <th className="py-2.5 px-3 w-[12%]">Retenidos</th>
+                  <th className="py-2.5 px-3 w-[12%]">Comentarios</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                {loading ? (
+                  <tr>
+                    <td colSpan={10} className="py-8 text-center text-slate-400 font-medium">
+                      Cargando trazabilidades activas...
+                    </td>
+                  </tr>
+                ) : dbTrazabilidades.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="py-12 text-center text-slate-400 font-medium bg-slate-50/20">
+                      Excelente: No hay trazabilidades abiertas de turnos anteriores.
+                    </td>
+                  </tr>
+                ) : (
+                  dbTrazabilidades.map((t) => {
+                    const isChecked = trazabilidadesResueltas.includes(t.id!);
+                    return (
+                      <tr 
+                        key={t.id} 
+                        className={`transition-all hover:bg-slate-50 ${isChecked ? 'bg-emerald-50/40 text-emerald-800' : ''}`}
+                      >
+                        <td className="py-3 px-3 text-center">
+                          <button
+                            type="button"
+                            disabled={!editable}
+                            onClick={() => handleEditHeredada(t.id!, 'hacia_adelante', !t.hacia_adelante)}
+                            className={`p-1 rounded-sm transition-all ${t.hacia_adelante ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                          >
+                            {t.hacia_adelante ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                          </button>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <button
+                            type="button"
+                            disabled={!editable}
+                            onClick={() => handleEditHeredada(t.id!, 'hacia_atras', !t.hacia_atras)}
+                            className={`p-1 rounded-sm transition-all ${t.hacia_atras ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                          >
+                            {t.hacia_atras ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                          </button>
+                        </td>
+                        <td className={`py-3 px-3 font-semibold ${isChecked ? 'line-through' : ''}`}>{t.codigo_sap}</td>
+                        <td className={`py-3 px-3 ${isChecked ? 'line-through' : ''}`}>{t.descripcion}</td>
+                        <td className={`py-3 px-3 ${isChecked ? 'line-through' : ''}`}>{t.orden}</td>
+                        <td className={`py-3 px-3 font-semibold ${isChecked ? 'line-through' : ''}`}>{t.lote}</td>
+                        <td className={`py-3 px-3 ${isChecked ? 'line-through' : ''}`}>{t.defecto}</td>
+                        <td className="py-2 px-2">
+                          <input
+                            type="text"
+                            value={t.tickets_inspeccionados || ''}
+                            onChange={(e) => handleEditHeredada(t.id!, 'tickets_inspeccionados', e.target.value)}
+                            disabled={!editable}
+                            className={`w-full text-xs p-1.5 border rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow ${isChecked ? 'bg-transparent border-transparent text-emerald-800' : 'bg-white border-slate-300'}`}
+                            placeholder="Tickets"
+                          />
+                        </td>
+                        <td className="py-2 px-2">
+                          <input
+                            type="text"
+                            value={t.tickets_retenidos || ''}
+                            onChange={(e) => handleEditHeredada(t.id!, 'tickets_retenidos', e.target.value)}
+                            disabled={!editable}
+                            className={`w-full text-xs p-1.5 border rounded-md focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-shadow ${isChecked ? 'bg-transparent border-transparent text-emerald-800' : 'bg-white border-slate-300'}`}
+                            placeholder="Retenidos"
+                          />
+                        </td>
+                        <td className="py-2 px-2">
+                          <input
+                            type="text"
+                            value={t.obs || ''}
+                            onChange={(e) => handleEditHeredada(t.id!, 'obs', e.target.value)}
+                            disabled={!editable}
+                            className={`w-full text-xs p-1.5 border rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow ${isChecked ? 'bg-transparent border-transparent text-emerald-800' : 'bg-white border-slate-300'}`}
+                            placeholder="Obs..."
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       {/* SECCION PENDIENTES DE TRABAJO (HERENCIA) */}
       <div className="w-full">
         <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 sm:p-5 flex flex-col h-full min-h-[300px]">

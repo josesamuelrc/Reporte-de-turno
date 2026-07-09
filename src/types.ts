@@ -119,6 +119,7 @@ export interface ReporteCompleto {
   rociadoras: IdentificacionRociadoras[];
   trazabilidades_nuevas: Trazabilidad[];
   trazabilidades_resueltas: number[]; // ids of resolved active trazabilidades
+  trazabilidades_activas_modificadas?: Trazabilidad[]; // modified inherited
   pendientes_nuevos: Pendiente[];
   pendientes_resueltos: number[]; // ids of resolved active pendientes
 }
@@ -148,7 +149,7 @@ export interface Paleta {
   nro_ticket: string;              // Número físico del ticket de retención
   camadas_sueltas: number;         // Camadas sueltas (si no es paleta completa, 0 indica paleta estándar)
   defecto: string;                 // Defecto específico de esta paleta
-  nca: number;                     // Nivel de Calidad Aceptable (NCA) asignado
+  nca: string;                     // Nivel de Calidad Aceptable (NCA) asignado
   estatus: 'Sin reprocesar' | 'En proceso' | 'Reprocesado' | 'Liberado Directo' | 'Desecho';
   creado_el: string;
 }

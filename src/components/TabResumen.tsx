@@ -78,11 +78,12 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     text += `👥 *Grupo:* ${cabecera.grupo} | ⏰ *Turno:* T${cabecera.turno}\n`;
     text += `👤 *Analista:* ${cabecera.analista || 'No asignado'}\n`;
     text += `⭐ *Start Quality:* ${cabecera.temp_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
-    if (cabecera.temp_cumple === false && cabecera.observaciones_ambiente) {
-      text += `⚠️ *Obs. Start Quality:* ${cabecera.observaciones_ambiente}\n`;
-    }
+    text += `🎛️ *Equipos de Medición:* ${cabecera.hum_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
     if (cabecera.caida_tension) {
-      text += `🛠️ *Equipos de Medición:* ${cabecera.caida_tension}\n`;
+      text += `⚡ *Caídas de Tensión:* ${cabecera.caida_tension}\n`;
+    }
+    if ((cabecera.temp_cumple === false || cabecera.hum_cumple === false) && cabecera.observaciones_ambiente) {
+      text += `⚠️ *Obs. Desviaciones:* ${cabecera.observaciones_ambiente}\n`;
     }
     text += `\n------------------------------------\n\n`;
 
@@ -180,17 +181,8 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     }
     text += `\n------------------------------------\n\n`;
 
-    // --- ROCIADORAS ---
-    if (rociadoras.length > 0) {
-      text += `🏷️ *7. COLORES DE ROCIADORAS ACTIVAS*\n`;
-      rociadoras.forEach(r => {
-        text += `• Maq ${r.maquina} (${r.linea}): *${r.color}* (${r.hora || 'S/H'})\n`;
-      });
-      text += `\n------------------------------------\n\n`;
-    }
-
     // --- REPROCESOS PBO ---
-    text += `🔄 *8. REPROCESOS REALIZADOS DURANTE EL TURNO*\n`;
+    text += `🔄 *7. REPROCESOS REALIZADOS DURANTE EL TURNO*\n`;
     if (matchingReprocesos.length > 0) {
       text += `⚠️ *Total:* ${matchingReprocesos.length} paleta(s) reprocesada(s):\n`;
       matchingReprocesos.forEach(r => {
@@ -204,6 +196,15 @@ export default function TabResumen({ reporte }: TabResumenProps) {
       text += `✅ No se registraron reprocesos de PBO en este turno.\n`;
     }
     text += `\n------------------------------------\n\n`;
+
+    // --- ROCIADORAS ---
+    if (rociadoras.length > 0) {
+      text += `🏷️ *8. COLORES DE ROCIADORAS ACTIVAS*\n`;
+      rociadoras.forEach(r => {
+        text += `• Maq ${r.maquina} (${r.linea}): *${r.color}* (${r.hora || 'S/H'})\n`;
+      });
+      text += `\n------------------------------------\n\n`;
+    }
 
     text += `👉 *Generado desde la App Polar de Control de Calidad*\n`;
     text += `====================================`;
@@ -347,10 +348,27 @@ export default function TabResumen({ reporte }: TabResumenProps) {
           </div>
 
           {/* Equipos de Medición */}
-          <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl text-xs col-span-1 md:col-span-2">
-            <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Equipos de Medición</span>
+          <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl flex items-center justify-between text-xs">
+            <div>
+              <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Equipos de Medición</span>
+              <span className="text-[10px] font-extrabold text-slate-500 leading-none mt-1 block">Instrumentación</span>
+            </div>
+            {cabecera.hum_cumple !== false ? (
+              <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200">
+                <CheckCircle className="w-3 h-3 text-emerald-600" /> CUMPLE
+              </span>
+            ) : (
+              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200 animate-pulse">
+                <XCircle className="w-3 h-3 text-rose-600" /> NO CUMPLE
+              </span>
+            )}
+          </div>
+
+          {/* Caídas de Tensión */}
+          <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl text-xs flex flex-col justify-center">
+            <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Caídas de Tensión</span>
             <span className="text-[11px] font-extrabold text-slate-700 block truncate mt-1">
-              {cabecera.caida_tension || 'Sin novedades reportadas'}
+              {cabecera.caida_tension || 'Sin caídas de tensión'}
             </span>
           </div>
         </div>
@@ -801,6 +819,31 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                     })}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* 8. Colores de Rociadoras Activas */}
+          {rociadoras.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
+                <Tag className="w-3.5 h-3.5 text-indigo-600" />
+                8. Colores de Rociadoras Activas
+              </h3>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-2">
+                {rociadoras.map((r, idx) => (
+                  <div key={idx} className="bg-slate-50 border border-slate-150 p-2.5 rounded-xl flex items-center justify-between text-xs">
+                    <div>
+                      <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Maq {r.maquina}</span>
+                      <span className="text-[10px] font-extrabold text-slate-600 mt-1 block">{r.linea}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="bg-white text-indigo-700 px-2 py-0.5 rounded text-[10px] font-bold border border-slate-200 block shadow-xs">{r.color}</span>
+                      <span className="text-[9px] font-semibold text-slate-400 mt-1 block">{r.hora || 'S/H'}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

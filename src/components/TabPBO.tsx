@@ -313,7 +313,7 @@ export default function TabPBO({
   const [modalPaletas, setModalPaletas] = useState<{
     index: number;
     nro_ticket: string;
-    nca: number;
+    nca: string;
     defecto: string;
     camadas_sueltas: number;
   }[]>([]);
@@ -345,7 +345,7 @@ export default function TabPBO({
     defecto_general: string;
     paletas_count: number;
     camadas_sueltas: number;
-    nca: number;
+    nca: string;
   }>({
     codigo_producto: '',
     producto: '',
@@ -356,7 +356,7 @@ export default function TabPBO({
     defecto_general: '',
     paletas_count: 1,
     camadas_sueltas: 0,
-    nca: 2.5
+    nca: '2.5'
   });
 
   // Reprocess form
@@ -581,7 +581,7 @@ export default function TabPBO({
         defecto_general: '',
         paletas_count: 1,
         camadas_sueltas: 0,
-        nca: 2.5
+        nca: '2.5'
       });
       setShowNewLoteModal(false);
       setSelectedLoteId(id_pbo);
@@ -924,10 +924,10 @@ export default function TabPBO({
     };
 
     const samplePalets: Paleta[] = [
-      { id: `${pboId}-P1`, id_pbo: pboId, nro_ticket: `TKT-${cleanDate}-01`, camadas_sueltas: 0, defecto: 'Tinta corrida severa', nca: 4.0, estatus: 'Reprocesado', creado_el: new Date().toISOString() },
-      { id: `${pboId}-P2`, id_pbo: pboId, nro_ticket: `TKT-${cleanDate}-02`, camadas_sueltas: 0, defecto: 'Tinta corrida moderada', nca: 2.5, estatus: 'Reprocesado', creado_el: new Date().toISOString() },
-      { id: `${pboId}-P3`, id_pbo: pboId, nro_ticket: `TKT-${cleanDate}-03`, camadas_sueltas: 0, defecto: 'Puntos de tinta sutiles', nca: 1.5, estatus: 'Liberado Directo', creado_el: new Date().toISOString() },
-      { id: `${pboId}-P4`, id_pbo: pboId, nro_ticket: `TKT-${cleanDate}-04`, camadas_sueltas: 0, defecto: 'Tinta corrida severa', nca: 4.0, estatus: 'Sin reprocesar', creado_el: new Date().toISOString() }
+      { id: `${pboId}-P1`, id_pbo: pboId, nro_ticket: `TKT-${cleanDate}-01`, camadas_sueltas: 0, defecto: 'Tinta corrida severa', nca: '4.0', estatus: 'Reprocesado', creado_el: new Date().toISOString() },
+      { id: `${pboId}-P2`, id_pbo: pboId, nro_ticket: `TKT-${cleanDate}-02`, camadas_sueltas: 0, defecto: 'Tinta corrida moderada', nca: '2.5', estatus: 'Reprocesado', creado_el: new Date().toISOString() },
+      { id: `${pboId}-P3`, id_pbo: pboId, nro_ticket: `TKT-${cleanDate}-03`, camadas_sueltas: 0, defecto: 'Puntos de tinta sutiles', nca: '1.5', estatus: 'Liberado Directo', creado_el: new Date().toISOString() },
+      { id: `${pboId}-P4`, id_pbo: pboId, nro_ticket: `TKT-${cleanDate}-04`, camadas_sueltas: 0, defecto: 'Tinta corrida severa', nca: '4.0', estatus: 'Sin reprocesar', creado_el: new Date().toISOString() }
     ];
 
     const sampleRepros: Reproceso[] = [
@@ -1821,14 +1821,13 @@ export default function TabPBO({
                                 </td>
                                 <td className="py-1 px-1.5">
                                   <input
-                                    type="number"
-                                    step="0.01"
+                                    type="text"
                                     value={p.nca}
                                     onChange={(e) => {
                                       const updated = [...paletas];
                                       const pi = updated.findIndex(item => item.id === p.id);
                                       if (pi !== -1) {
-                                        updated[pi].nca = parseFloat(e.target.value) || 0;
+                                        updated[pi].nca = e.target.value;
                                         setPaletas(updated);
                                       }
                                     }}
@@ -2497,10 +2496,9 @@ export default function TabPBO({
                 <div>
                   <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">Nivel de Calidad Aceptable (NCA) General</label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
                     value={newLote.nca}
-                    onChange={(e) => setNewLote(prev => ({ ...prev, nca: parseFloat(e.target.value) || 2.5 }))}
+                    onChange={(e) => setNewLote(prev => ({ ...prev, nca: e.target.value }))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5"
                   />
                 </div>
@@ -2510,7 +2508,7 @@ export default function TabPBO({
                   <input
                     type="number"
                     value={newLote.paletas_count}
-                    onChange={(e) => setNewLote(prev => ({ ...prev, paletas_count: parseInt(e.target.value) || 1 }))}
+                    onChange={(e) => setNewLote(prev => ({ ...prev, paletas_count: parseInt(e.target.value) >= 0 ? parseInt(e.target.value) : 0 }))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-bold"
                   />
                 </div>
@@ -2587,11 +2585,10 @@ export default function TabPBO({
                         <div className="col-span-6 sm:col-span-2">
                           <label className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5 leading-tight sm:hidden">NCA</label>
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
                             value={mp.nca}
                             onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
+                              const val = e.target.value;
                               setModalPaletas(prev => prev.map(p => p.index === mp.index ? { ...p, nca: val } : p));
                             }}
                             className="w-full bg-slate-50 border border-slate-200 rounded-md p-1 px-1.5 font-bold text-[11px] focus:bg-white"
