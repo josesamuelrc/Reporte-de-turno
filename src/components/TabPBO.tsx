@@ -27,7 +27,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { LotePBO, Paleta, Reproceso } from '../types';
-import { getLotesPBO, saveLotePBO, deleteLotePBO, getPaletasPBO, savePaletasPBO, getReprocesosPBO, saveReprocesoPBO } from '../db';
+import { getLotesPBO, saveLotePBO, deleteLotePBO, getPaletasPBO, savePaletasPBO, getReprocesosPBO, saveReprocesoPBO, deleteReprocesoPBO } from '../db';
 
 export interface CatalogoProductoPBO {
   codigo: string;
@@ -328,7 +328,7 @@ export default function TabPBO({
   
   // PBO Modals & Forms
   const [showNewLoteModal, setShowNewLoteModal] = useState(false);
-  const [pboTabActive, setPboTabActive] = useState<'info' | 'paletas' | 'reproceso' | 'dictamen' | 'causas' | 'traslado'>('info');
+  const [pboTabActive, setPboTabActive] = useState<'info' | 'paletas' | 'reproceso' | 'causas' | 'traslado'>('info');
 
   // Security Login state inside PBO if not authenticated
   const [pinInput, setPinInput] = useState('');
@@ -363,9 +363,8 @@ export default function TabPBO({
   const [reproForm, setReproForm] = useState({
     tickets_originales_consumidos: '',
     nuevo_ticket_reprocesado: '',
-    paletas_nuevas: 1,
+    paletas_nuevas: 0,
     camadas_sueltas: 0,
-    observacion_laboratorio: ''
   });
 
   // Lab Dictamen Selection
@@ -594,6 +593,46 @@ export default function TabPBO({
     }
   };
 
+  // Handle Paleta Status Change
+  const handlePaletaStatusChange = async (paleta: Paleta, newEstatus: string) => {
+    if (paleta.estatus === 'Reprocesado' && newEstatus === 'Sin reprocesar') {
+        const confirmMsg = "Advertencia: Cambiar el estatus de una paleta reprocesada a 'Sin reprocesar' eliminará el ticket de reproceso asociado y revertirá todas las paletas involucradas. ¿Desea continuar?";
+        if (!window.confirm(confirmMsg)) return;
+
+        const targetRepro = reprocesos.find(r => r.id_pbo === paleta.id_pbo && r.tickets_originales_consumidos.includes(paleta.nro_ticket));
+        
+        if (targetRepro) {
+            const ticketsToRevert = targetRepro.tickets_originales_consumidos.split(',').map(t => t.trim().toUpperCase());
+            
+            const updatedPaletas = paletas.map(p2 => {
+               if (p2.id_pbo === paleta.id_pbo && ticketsToRevert.includes(p2.nro_ticket.toUpperCase())) {
+                   return { ...p2, estatus: 'Sin reprocesar' as any };
+               }
+               return p2;
+            });
+            
+            setPaletas(updatedPaletas);
+            
+            try {
+                await deleteReprocesoPBO(targetRepro.id);
+                setReprocesos(prev => prev.filter(r => r.id !== targetRepro.id));
+                alert("El ticket de reproceso asociado ha sido eliminado y las paletas revertidas a 'Sin reprocesar'. Recuerde hacer clic en 'Actualizar Datos Quirúrgicos' para guardar los cambios de las paletas.");
+            } catch (e) {
+                console.error(e);
+            }
+            return;
+        }
+    }
+    
+    // Normal change
+    const updated = [...paletas];
+    const pi = updated.findIndex(item => item.id === paleta.id);
+    if (pi !== -1) {
+        updated[pi].estatus = newEstatus as any;
+        setPaletas(updated);
+    }
+  };
+
   // Mass save individual palets
   const handleUpdatePaletas = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -624,8 +663,12 @@ export default function TabPBO({
     }
     if (!selectedLoteId) return;
 
-    if (!reproForm.tickets_originales_consumidos || !reproForm.nuevo_ticket_reprocesado) {
-      alert("Debe indicar qué tickets se consumieron y el nuevo ticket generado.");
+    if (!reproForm.tickets_originales_consumidos) {
+      alert("Debe indicar qué tickets se consumieron.");
+      return;
+    }
+    if (reproForm.paletas_nuevas > 0 && !reproForm.nuevo_ticket_reprocesado) {
+      alert("Debe indicar el nuevo ticket generado para la paleta.");
       return;
     }
 
@@ -634,11 +677,10 @@ export default function TabPBO({
       id: reproId,
       id_pbo: selectedLoteId,
       tickets_originales_consumidos: reproForm.tickets_originales_consumidos,
-      nuevo_ticket_reprocesado: reproForm.nuevo_ticket_reprocesado,
+      nuevo_ticket_reprocesado: reproForm.nuevo_ticket_reprocesado || 'N/A',
       camadas_sueltas: reproForm.camadas_sueltas,
-      estatus_calidad: 'En Control de Calidad',
+      estatus_calidad: 'Chequeado por Calidad',
       estatus_logistica: 'En espera',
-      observacion_laboratorio: reproForm.observacion_laboratorio,
       usuario_registro: 'CALIDAD (REPROCESO)',
       creado_el: new Date().toISOString(),
       fecha_registro: cabeceraFecha,
@@ -670,9 +712,8 @@ export default function TabPBO({
       setReproForm({
         tickets_originales_consumidos: '',
         nuevo_ticket_reprocesado: '',
-        paletas_nuevas: 1,
+        paletas_nuevas: 0,
         camadas_sueltas: 0,
-        observacion_laboratorio: ''
       });
       setRefreshTrigger(p => p + 1);
       alert(`¡Lote de reproceso registrado! Las paletas originales consumidas se marcaron como 'Reprocesado'. El nuevo ticket ${nuevoRep.nuevo_ticket_reprocesado} ha quedado 'En Control de Calidad'.`);
@@ -682,39 +723,6 @@ export default function TabPBO({
     }
   };
 
-  // Lab Dictamen Submit
-  const handleDictamenSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (currentRole !== 'calidad') {
-      alert("Acceso denegado: Solo calidad puede emitir dictámenes.");
-      return;
-    }
-    if (!selectedReproId) return;
-
-    const reproToDictamine = reprocesos.find(r => r.id === selectedReproId);
-    if (!reproToDictamine) return;
-
-    const updatedRepro: Reproceso = {
-      ...reproToDictamine,
-      estatus_calidad: dictamenEstatus === 'Aprobado' ? 'Aprobado' : 'Rechazado',
-      observacion_laboratorio: dictamenObs
-    };
-
-    try {
-      await saveReprocesoPBO(updatedRepro);
-      await checkAndAutoCloseLote(reproToDictamine.id_pbo);
-
-      // If approved, let's also update status of these palets if they correspond
-      // We will refresh data
-      setDictamenObs('');
-      setSelectedReproId(null);
-      setRefreshTrigger(p => p + 1);
-      alert(`¡Dictamen técnico registrado como ${dictamenEstatus}!`);
-    } catch (err) {
-      console.error(err);
-      alert("Error al guardar dictamen.");
-    }
-  };
 
   // Logistics update stock movement
   const handleMoveUbicacion = async (ubicacion: string) => {
@@ -939,7 +947,6 @@ export default function TabPBO({
         camadas_sueltas: 0,
         estatus_calidad: 'Aprobado',
         estatus_logistica: 'Confirmado',
-        observacion_laboratorio: 'Excelente nivel de adherencia del barniz protector tras el reprocesado secundario. Pasa pruebas funcionales.',
         usuario_registro: 'INSPECTOR CALIDAD PRUEBAS',
         creado_el: new Date().toISOString(),
         fecha_registro: cabeceraFecha,
@@ -1704,15 +1711,7 @@ export default function TabPBO({
                         pboTabActive === 'reproceso' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-400 hover:text-slate-700'
                       }`}
                     >
-                      🔄 Reproceso / Rework ({activeLoteRepros.length})
-                    </button>
-                    <button
-                      onClick={() => setPboTabActive('dictamen')}
-                      className={`py-2 px-3.5 font-bold text-xs transition-all whitespace-nowrap border-b-2 cursor-pointer ${
-                        pboTabActive === 'dictamen' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-400 hover:text-slate-700'
-                      }`}
-                    >
-                      🔬 Dictamen Laboratorio
+                      🔄 Reproceso ({activeLoteRepros.length})
                     </button>
                     <button
                       onClick={() => setPboTabActive('causas')}
@@ -1735,7 +1734,15 @@ export default function TabPBO({
                   {/* ACTIVE TAB VIEWS */}
                   
                   {/* TAB 1: GENERAL INFO */}
-                  {pboTabActive === 'info' && (
+                  {pboTabActive === 'info' && (() => {
+                    const materialReprocesado = activeLotePaletas.filter(p => p.estatus === 'Reprocesado').reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
+                    const materialSalidaReproceso = activeLoteRepros.reduce((acc, r) => acc + ((r.paletas_nuevas || 0) * getCansPerPallet(activeLote.formato)) + ((r.camadas_sueltas || 0) * getCansPerCamada()), 0);
+                    const materialBriqueta = activeLotePaletas.filter(p => p.estatus === 'Briqueta' || p.estatus === 'Desecho').reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
+                    const diferenciaReproceso = Math.max(0, materialReprocesado - materialSalidaReproceso);
+                    const materialNoConforme = materialBriqueta + diferenciaReproceso;
+                    const materialNoReprocesado = activeLotePaletas.filter(p => p.estatus === 'Sin reprocesar' || p.estatus === 'En proceso' || p.estatus === 'Aceptado Con desviacion' || p.estatus === 'Liberado Directo').reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
+
+                    return (
                     <div className="space-y-4 text-xs">
                       <div className="grid grid-cols-2 gap-4">
                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
@@ -1755,19 +1762,33 @@ export default function TabPBO({
                           <span className="font-bold text-slate-800 text-sm mt-0.5 block">{activeLote.cantidad_total_latas.toLocaleString()} latas</span>
                         </div>
                       </div>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                          <span className="text-blue-600 block font-bold uppercase text-[9px] tracking-wider">Material Reprocesado</span>
+                          <span className="font-bold text-blue-800 text-sm mt-0.5 block">{materialReprocesado.toLocaleString()} latas</span>
+                        </div>
+                        <div className="bg-amber-50/50 p-3 rounded-xl border border-amber-100">
+                          <span className="text-amber-600 block font-bold uppercase text-[9px] tracking-wider">Material No Reprocesado</span>
+                          <span className="font-bold text-amber-800 text-sm mt-0.5 block">{materialNoReprocesado.toLocaleString()} latas</span>
+                        </div>
+                        <div className="bg-red-50/50 p-3 rounded-xl border border-red-100">
+                          <span className="text-red-600 block font-bold uppercase text-[9px] tracking-wider">Material No Conforme</span>
+                          <span className="font-bold text-red-800 text-sm mt-0.5 block">{materialNoConforme.toLocaleString()} latas</span>
+                        </div>
+                      </div>
 
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                         <span className="text-slate-400 block font-bold uppercase text-[9px] tracking-wider mb-1">Defecto Inicial Reportado</span>
                         <span className="font-bold text-slate-700 leading-relaxed block">{activeLote.defecto_general}</span>
                       </div>
-
                       <div className="flex gap-4 text-[11px] text-slate-400">
                         <span>Creado el: <strong>{new Date(activeLote.creado_el).toLocaleDateString()}</strong></span>
                         <span>Registrado por: <strong>{activeLote.usuario_registro}</strong></span>
                       </div>
                     </div>
-                  )}
-
+                  )})()
+                  }
                   {/* TAB 2: PALETAS RETENIDAS */}
                   {pboTabActive === 'paletas' && (
                     <form onSubmit={handleUpdatePaletas} className="space-y-4">
@@ -1854,14 +1875,7 @@ export default function TabPBO({
                                 <td className="py-2 px-3">
                                   <select
                                     value={p.estatus}
-                                    onChange={(e) => {
-                                      const updated = [...paletas];
-                                      const pi = updated.findIndex(item => item.id === p.id);
-                                      if (pi !== -1) {
-                                        updated[pi].estatus = e.target.value as any;
-                                        setPaletas(updated);
-                                      }
-                                    }}
+                                    onChange={(e) => handlePaletaStatusChange(p, e.target.value)}
                                     disabled={currentRole !== 'calidad'}
                                     className="bg-slate-50 border border-slate-200 text-xs p-1 rounded-md disabled:opacity-75 font-semibold text-slate-700"
                                   >
@@ -1984,12 +1998,23 @@ export default function TabPBO({
                             </div>
                             <div>
                               <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                                Paletas completas generadas
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={reproForm.paletas_nuevas}
+                                onChange={(e) => setReproForm(prev => ({ ...prev, paletas_nuevas: parseInt(e.target.value) || 0 }))}
+                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2.5 focus:outline-hidden text-slate-800"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
                                 Nuevo Ticket Generado post-reproceso
                               </label>
                               <input
                                 type="text"
-                                placeholder="Ej: TKT-20260707-REWORK-A1"
-                                required
+                                placeholder="Requerido si hay paletas completas"
                                 value={reproForm.nuevo_ticket_reprocesado}
                                 onChange={(e) => setReproForm(prev => ({ ...prev, nuevo_ticket_reprocesado: e.target.value }))}
                                 className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2.5 font-mono focus:outline-hidden text-slate-800"
@@ -2021,182 +2046,58 @@ export default function TabPBO({
 
                       {/* Reprocess list: Historial */}
                       <div className="space-y-3">
-                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Historial de Reworks / Tickets generados</h3>
+                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Material reprocesado</h3>
                         {activeLoteRepros.length === 0 ? (
                           <div className="text-slate-400 text-xs font-semibold py-4 text-center bg-slate-50 rounded-xl border border-slate-100">
                             Ningún lote ha ingresado a reprocesamiento secundario aún.
                           </div>
                         ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {activeLoteRepros.map(r => (
-                              <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4 text-xs shadow-2xs">
-                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                                  <span className="font-bold text-slate-700 flex items-center gap-1">
-                                    📦 Ticket Rework: <strong className="font-mono text-indigo-700">{r.nuevo_ticket_reprocesado}</strong>
-                                  </span>
-                                  <span className="text-[10px] text-slate-400 font-mono">{new Date(r.creado_el).toLocaleDateString()}</span>
-                                </div>
-                                <div className="text-slate-600 space-y-1">
-                                  <div>
-                                    🔄 Consumió tickets: <strong className="font-mono text-slate-700">{r.tickets_originales_consumidos}</strong>
-                                  </div>
-                                  {r.camadas_sueltas > 0 && (
-                                    <div>
-                                      🥞 Camadas sueltas: <strong>{r.camadas_sueltas} capas</strong>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="mt-3 grid grid-cols-2 gap-4 border-t border-slate-100 pt-2 text-[11px]">
-                                  <div>
-                                    Dictamen Calidad:{' '}
-                                    <strong className={`font-bold ${
-                                      r.estatus_calidad === 'Aprobado' 
-                                        ? 'text-emerald-600' 
-                                        : r.estatus_calidad === 'Rechazado' 
-                                          ? 'text-red-600' 
-                                          : 'text-amber-500'
-                                    }`}>
-                                      {r.estatus_calidad}
-                                    </strong>
-                                  </div>
-                                  <div>
-                                    Logística:{' '}
-                                    <strong className={`font-bold ${
-                                      r.estatus_logistica === 'Confirmado' 
-                                        ? 'text-emerald-600' 
-                                        : r.estatus_logistica === 'Inconsistencia' 
-                                          ? 'text-red-600' 
-                                          : 'text-slate-500'
-                                    }`}>
-                                      {r.estatus_logistica}
-                                    </strong>
-                                  </div>
-                                </div>
-                                {r.observacion_laboratorio && (
-                                  <div className="mt-2.5 bg-slate-50 p-2 rounded-lg border border-slate-100 text-[10px] text-slate-500 italic">
-                                    🧪 Lab: {r.observacion_laboratorio}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                          <div className="overflow-x-auto rounded-lg border border-slate-200">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-slate-50 text-slate-600 font-bold uppercase border-b border-slate-200">
+                                  <th className="py-2.5 px-3">Tickets Generados</th>
+                                  <th className="py-2.5 px-3 text-center">Camadas Generadas</th>
+                                  <th className="py-2.5 px-3">Tickets Originales Consumidos</th>
+                                  <th className="py-2.5 px-3">Status Calidad</th>
+                                  <th className="py-2.5 px-3">Status Logística</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 text-slate-700">
+                                {activeLoteRepros.map(r => (
+                                  <tr key={r.id} className="hover:bg-slate-50/50">
+                                    <td className="py-2 px-3 font-mono font-bold text-indigo-700">{r.nuevo_ticket_reprocesado}</td>
+                                    <td className="py-2 px-3 text-center font-semibold">{r.camadas_sueltas || '0'}</td>
+                                    <td className="py-2 px-3 font-mono text-slate-500">{r.tickets_originales_consumidos}</td>
+                                    <td className="py-2 px-3">
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        r.estatus_calidad === 'Aprobado' || r.estatus_calidad === 'Chequeado por Calidad'
+                                          ? 'bg-emerald-100 text-emerald-800' 
+                                          : r.estatus_calidad === 'Rechazado' 
+                                            ? 'bg-red-100 text-red-800' 
+                                            : 'bg-amber-100 text-amber-800'
+                                      }`}>
+                                        {r.estatus_calidad}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-3">
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        r.estatus_logistica === 'Confirmado' 
+                                          ? 'bg-emerald-100 text-emerald-800' 
+                                          : r.estatus_logistica === 'Inconsistencia' 
+                                            ? 'bg-red-100 text-red-800' 
+                                            : 'bg-slate-200 text-slate-700'
+                                      }`}>
+                                        {r.estatus_logistica}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
                         )}
                       </div>
-
-                    </div>
-                  )}
-
-                  {/* TAB 4: LAB DICTAMEN */}
-                  {pboTabActive === 'dictamen' && (
-                    <div className="space-y-6">
-                      <div className="space-y-3">
-                        <span className="text-slate-400 block font-bold uppercase text-[9px] tracking-wider">Tickets en proceso de análisis de laboratorio</span>
-                        
-                        {activeLoteRepros.length === 0 ? (
-                          <div className="text-slate-400 text-xs font-semibold py-4 text-center bg-slate-50 rounded-xl border border-slate-100">
-                            No hay tickets de reproceso para evaluar técnicamente en este folio.
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {activeLoteRepros.map(r => (
-                              <div
-                                key={r.id}
-                                onClick={() => {
-                                  if (currentRole === 'calidad') {
-                                    setSelectedReproId(r.id);
-                                    setDictamenEstatus(r.estatus_calidad === 'Rechazado' ? 'Rechazado' : 'Aprobado');
-                                    setDictamenObs(r.observacion_laboratorio || '');
-                                  }
-                                }}
-                                className={`p-3 rounded-xl border transition-all text-xs ${
-                                  selectedReproId === r.id 
-                                    ? 'border-indigo-500 bg-indigo-50/10' 
-                                    : 'border-slate-200 hover:bg-slate-50 cursor-pointer'
-                                }`}
-                              >
-                                <div className="flex justify-between font-bold">
-                                  <span className="font-mono text-slate-700">{r.nuevo_ticket_reprocesado}</span>
-                                  <span className={`px-2 py-0.5 rounded-md text-[9px] uppercase ${
-                                    r.estatus_calidad === 'Aprobado' 
-                                      ? 'bg-emerald-100 text-emerald-800' 
-                                      : r.estatus_calidad === 'Rechazado' 
-                                        ? 'bg-red-100 text-red-800' 
-                                        : 'bg-amber-100 text-amber-800'
-                                  }`}>
-                                    {r.estatus_calidad}
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-400 mt-1">Consumió: {r.tickets_originales_consumidos}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Dictamen input fields */}
-                      {selectedReproId && currentRole === 'calidad' && (
-                        <form onSubmit={handleDictamenSubmit} className="bg-indigo-50/20 border border-indigo-100 p-5 rounded-2xl space-y-4">
-                          <h4 className="text-xs font-extrabold text-indigo-800 uppercase tracking-widest flex items-center gap-1 border-b border-indigo-100 pb-2">
-                            🧪 Dictaminar Ticket post-reproceso
-                          </h4>
-                          
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">Dictamen de Calidad</label>
-                              <div className="flex gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setDictamenEstatus('Aprobado')}
-                                  className={`flex-1 font-bold text-xs py-2 rounded-xl border transition-all cursor-pointer ${
-                                    dictamenEstatus === 'Aprobado' 
-                                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' 
-                                      : 'bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-50'
-                                  }`}
-                                >
-                                  Aprobado (Para PT)
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setDictamenEstatus('Rechazado')}
-                                  className={`flex-1 font-bold text-xs py-2 rounded-xl border transition-all cursor-pointer ${
-                                    dictamenEstatus === 'Rechazado' 
-                                      ? 'bg-red-600 text-white border-red-600 shadow-sm' 
-                                      : 'bg-white text-red-600 border-red-200 hover:bg-red-50'
-                                  }`}
-                                >
-                                  Rechazado (Desecho)
-                                </button>
-                              </div>
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">Observaciones de laboratorio / Pruebas funcionales</label>
-                              <textarea
-                                value={dictamenObs}
-                                onChange={(e) => setDictamenObs(e.target.value)}
-                                placeholder="Escriba aquí los resultados del laboratorio físico-químico..."
-                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2.5 h-16 focus:outline-hidden"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex justify-end pt-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedReproId(null)}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer"
-                            >
-                              Cancelar
-                            </button>
-                            <button
-                              type="submit"
-                              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer"
-                            >
-                              Guardar Dictamen Final
-                            </button>
-                          </div>
-                        </form>
-                      )}
-
                     </div>
                   )}
 

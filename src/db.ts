@@ -12,7 +12,7 @@ import {
   Pendiente,
   LotePBO,
   Paleta,
-  Reproceso
+  Reproceso, RocePrueba
 } from './types';
 
 // Default analistas list
@@ -1059,7 +1059,6 @@ CREATE TABLE IF NOT EXISTS pbo_reprocesos (
     camadas_sueltas INTEGER NOT NULL,
     estatus_calidad TEXT NOT NULL,
     estatus_logistica TEXT NOT NULL,
-    observacion_laboratorio TEXT,
     usuario_registro TEXT NOT NULL,
     creado_el TEXT NOT NULL
 );
@@ -1182,6 +1181,7 @@ export const savePaletasPBO = async (paletasToSave: Paleta[]): Promise<void> => 
   setLocalData('pbo_paletas', paletas);
 };
 
+
 export const getReprocesosPBO = async (): Promise<Reproceso[]> => {
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -1189,7 +1189,7 @@ export const getReprocesosPBO = async (): Promise<Reproceso[]> => {
       const { data, error } = await supabase.from('pbo_reprocesos').select('*');
       if (!error && data) return data;
     } catch (e) {
-      console.error("Supabase PBO Reprocesos error", e);
+      console.error("Supabase PBO Reproceso error", e);
     }
   }
   return getLocalData('pbo_reprocesos');
@@ -1215,3 +1215,66 @@ export const saveReprocesoPBO = async (reproceso: Reproceso): Promise<void> => {
   setLocalData('pbo_reprocesos', reprocesos);
 };
 
+export const deleteReprocesoPBO = async (id: string): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('pbo_reprocesos').delete().eq('id', id);
+      if (error) throw error;
+      return;
+    } catch (e) {
+      console.error("Supabase Delete Reproceso PBO error", e);
+    }
+  }
+  let reprocesos = getLocalData('pbo_reprocesos');
+  reprocesos = reprocesos.filter((r: Reproceso) => r.id !== id);
+  setLocalData('pbo_reprocesos', reprocesos);
+};
+
+export const getRocePruebas = async (): Promise<RocePrueba[]> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('roce_pruebas').select('*').order('creado_el', { ascending: false });
+      if (error) throw error;
+      return data as RocePrueba[];
+    } catch (e) {
+      console.error("Supabase RocePruebas error", e);
+    }
+  }
+  return getLocalData('roce_pruebas');
+};
+
+export const saveRocePrueba = async (prueba: RocePrueba): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('roce_pruebas').upsert([prueba]);
+      if (error) throw error;
+      return;
+    } catch (e) {
+      console.error("Supabase Save RocePrueba error", e);
+    }
+  }
+  const pruebas = getLocalData('roce_pruebas');
+  const index = pruebas.findIndex((p: RocePrueba) => p.id === prueba.id);
+  if (index >= 0) pruebas[index] = prueba;
+  else pruebas.push(prueba);
+  setLocalData('roce_pruebas', pruebas);
+};
+
+export const deleteRocePrueba = async (id: string): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('roce_pruebas').delete().eq('id', id);
+      if (error) throw error;
+      return;
+    } catch (e) {
+      console.error("Supabase Delete RocePrueba error", e);
+    }
+  }
+  let pruebas = getLocalData('roce_pruebas');
+  pruebas = pruebas.filter((p: RocePrueba) => p.id !== id);
+  setLocalData('roce_pruebas', pruebas);
+};

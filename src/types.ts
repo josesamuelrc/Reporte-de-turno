@@ -147,7 +147,8 @@ export interface Paleta {
   id: string;                      // ID único
   id_pbo: string;                  // Llave foránea hacia LotePBO
   nro_ticket: string;              // Número físico del ticket de retención
-  camadas_sueltas: number;         // Camadas sueltas (si no es paleta completa, 0 indica paleta estándar)
+  camadas_sueltas: number;
+  paletas_nuevas?: number;         // Camadas sueltas (si no es paleta completa, 0 indica paleta estándar)
   defecto: string;                 // Defecto específico de esta paleta
   nca: string;                     // Nivel de Calidad Aceptable (NCA) asignado
   estatus: 'Sin reprocesar' | 'En proceso' | 'Reprocesado' | 'Liberado Directo' | 'Desecho';
@@ -159,12 +160,24 @@ export interface Reproceso {
   id_pbo: string;
   tickets_originales_consumidos: string; // Tickets que entraron al reproceso
   nuevo_ticket_reprocesado: string;      // Nuevo ticket generado físico
-  camadas_sueltas: number;               // 0 si es paleta completa
-  estatus_calidad: 'En Control de Calidad' | 'Aprobado' | 'Rechazado';
+  camadas_sueltas: number;
+  paletas_nuevas?: number;               // 0 si es paleta completa
+  estatus_calidad: 'Chequeado por Calidad' | 'En Control de Calidad' | 'Aprobado' | 'Rechazado';
   estatus_logistica: 'En espera' | 'Confirmado' | 'Inconsistencia';
-  observacion_laboratorio: string;
   usuario_registro: string;
   creado_el: string;
   fecha_registro?: string;
   turno_registro?: number;
+}
+
+export interface RocePrueba {
+  id: string;
+  fecha: string;
+  turno: number;
+  codigo_sap: string;
+  producto: string;
+  lote: string;
+  resultados: Record<number, string>; // { 1: 'Sin roce', 2: 'Leve', ..., 12: 'Moderado' }
+  usuario: string;
+  creado_el: string;
 }

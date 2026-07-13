@@ -3,6 +3,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Printer, AlertOctagon, AlertTriangle, CheckCircle, XCircle, Tag, Layers, FileText, ArrowRightLeft, FileCheck, Copy, Package, ShieldAlert, RotateCcw } from 'lucide-react';
 import { ReporteCompleto, LotePBO, Paleta, Reproceso } from '../types';
 import { getLotesPBO, getPaletasPBO, getReprocesosPBO } from '../db';
+import { CATALOGO_PRODUCTOS_PBO } from './TabPBO';
 
 interface TabResumenProps {
   reporte: ReporteCompleto | null;
@@ -107,10 +108,18 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     if (matchingPboLotes.length > 0) {
       text += `⚠️ *Total:* ${matchingPboLotes.length} lote(s) registrados o movidos:\n`;
       matchingPboLotes.forEach(l => {
-        text += `• *Folio:* ${l.id_pbo} | Producto: ${l.producto}\n`;
-        text += `  - *Lote:* ${l.lote} | *Orden:* ${l.orden} | *Cant:* ${l.cantidad_total_latas.toLocaleString()} latas\n`;
+        const lotePalets = pboPaletas.filter(p => p.id_pbo === l.id_pbo);
+        const paletasCompletas = lotePalets.filter(p => p.camadas_sueltas === 0).length;
+        const camadasSueltasTotal = lotePalets.reduce((acc, p) => acc + p.camadas_sueltas, 0);
+        const catalogItem = CATALOGO_PRODUCTOS_PBO.find(c => c.nombre.toUpperCase() === l.producto.toUpperCase());
+        const codigoSap = catalogItem ? catalogItem.codigo : 'N/D';
+        const ncaGral = lotePalets.length > 0 ? lotePalets[0].nca : 'N/D';
+
+        text += `• *SAP:* ${codigoSap} | *Desc:* ${l.producto}\n`;
+        text += `  - *Lote:* ${l.lote} | *Orden:* ${l.orden}\n`;
+        text += `  - *Paletas:* ${paletasCompletas} | *Camadas:* ${camadasSueltasTotal}\n`;
         text += `  - *Defecto:* _${l.defecto_general}_\n`;
-        text += `  - *Ubicación Física:* ${l.ubicacion.toUpperCase()}\n`;
+        text += `  - *NCA:* ${ncaGral}\n`;
       });
     } else {
       text += `✅ Sin movimientos de Producto Bajo Observación (PBO) creados en este turno.\n`;
@@ -182,20 +191,47 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     text += `\n------------------------------------\n\n`;
 
     // --- REPROCESOS PBO ---
-    text += `🔄 *7. REPROCESOS REALIZADOS DURANTE EL TURNO*\n`;
+    text += `🔄 *7. REPROCESOS REALIZADOS DURANTE EL TURNO*
+`;
     if (matchingReprocesos.length > 0) {
-      text += `⚠️ *Total:* ${matchingReprocesos.length} paleta(s) reprocesada(s):\n`;
+      const groupedRepros: Record<string, { sap: string; orden: string; lote: string; tickets: string[]; paletas: number; camadas: number; }> = {};
       matchingReprocesos.forEach(r => {
         const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
-        text += `• Folio PBO: *${r.id_pbo}* ${pboInfo ? `(Lote: ${pboInfo.lote})` : ''}\n`;
-        text += `  - *Ticket Nuevo:* ${r.nuevo_ticket_reprocesado}\n`;
-        text += `  - *Tickets Consumidos:* ${r.tickets_originales_consumidos}\n`;
-        text += `  - *Estatus Calidad:* ${r.estatus_calidad} | *Estatus Logística:* ${r.estatus_logistica}\n`;
+        if (!pboInfo) return;
+        const catalogItem = CATALOGO_PRODUCTOS_PBO.find(c => c.nombre.toUpperCase() === pboInfo.producto.toUpperCase());
+        const codigoSap = catalogItem ? catalogItem.codigo : 'N/D';
+        const key = `${codigoSap}-${pboInfo.orden}-${pboInfo.lote}`;
+        if (!groupedRepros[key]) {
+          groupedRepros[key] = { sap: codigoSap, orden: pboInfo.orden, lote: pboInfo.lote, tickets: [], paletas: 0, camadas: 0 };
+        }
+        if (r.nuevo_ticket_reprocesado && r.nuevo_ticket_reprocesado !== 'N/A') {
+           groupedRepros[key].tickets.push(r.nuevo_ticket_reprocesado);
+           groupedRepros[key].paletas += 1;
+        }
+        if (r.camadas_sueltas > 0) {
+           groupedRepros[key].camadas += r.camadas_sueltas;
+        }
+      });
+      
+      const groups = Object.values(groupedRepros);
+      text += `⚠️ *Total:* ${groups.length} código(s) SAP con reproceso(s):
+`;
+      groups.forEach(group => {
+        text += `• *SAP:* ${group.sap} | *Lote:* ${group.lote} | *Orden:* ${group.orden}
+`;
+        text += `  - *Tickets Reprocesados:* ${group.tickets.join(', ') || 'N/A'}
+`;
+        text += `  - *Total Generado:* ${group.paletas} Paletas, ${group.camadas} Camadas
+`;
       });
     } else {
-      text += `✅ No se registraron reprocesos de PBO en este turno.\n`;
+      text += `✅ No se registraron reprocesos de PBO en este turno.
+`;
     }
-    text += `\n------------------------------------\n\n`;
+    text += `
+------------------------------------
+
+`;
 
     // --- ROCIADORAS ---
     if (rociadoras.length > 0) {
@@ -500,50 +536,56 @@ export default function TabResumen({ reporte }: TabResumenProps) {
           <div className="space-y-1.5 pt-1">
             <h3 className="text-[10px] font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
               <ShieldAlert className="w-3.5 h-3.5 text-orange-600 animate-pulse" />
-              2. Movimientos de Producto Bajo Observación (PBO) del Turno
+              2. PRODUCTO BAJO OBSERVACIÓN (PBO)
             </h3>
             {matchingPboLotes.length === 0 ? (
               <div className="bg-slate-50 border border-slate-200/60 p-3 rounded-xl text-[11px] text-slate-400 font-bold italic text-center">
                 ✓ No se registraron folios de Producto Bajo Observación (PBO) creados durante el turno actual.
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {matchingPboLotes.map(l => {
-                    const lotePalets = pboPaletas.filter(p => p.id_pbo === l.id_pbo);
-                    const loteRepros = pboReprocesos.filter(r => r.id_pbo === l.id_pbo);
-                    return (
-                      <div key={l.id_pbo} className="bg-orange-50/10 border border-orange-100 p-3.5 rounded-xl text-xs space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono font-black text-slate-850 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-[10px]">{l.id_pbo}</span>
-                          <span className="text-[9px] font-bold uppercase text-orange-700 bg-orange-100 px-1.5 py-0.5 rounded">Ubicación: {l.ubicacion.toUpperCase()}</span>
-                        </div>
-                        <div className="font-bold text-slate-850">{l.producto}</div>
-                        <div className="text-[10px] text-slate-500 leading-normal">
-                          Lote: <strong className="font-mono text-slate-700">{l.lote}</strong> | Orden: <strong className="font-mono text-slate-700">{l.orden}</strong> | Cans: <strong>{l.cantidad_total_latas.toLocaleString()}</strong>
-                        </div>
-                        <div className="bg-white p-2 rounded-lg border border-orange-100/40 text-[10px] text-slate-600">
-                          <span className="font-extrabold uppercase text-[9px] block text-slate-400 mb-0.5">Defecto general:</span>
-                          {l.defecto_general}
-                        </div>
-                        {lotePalets.length > 0 && (
-                          <div className="text-[10px] text-slate-500">
-                            Paletas ({lotePalets.length}): <span className="font-mono text-slate-600">{lotePalets.map(p => `${p.nro_ticket} (${p.estatus})`).join(', ')}</span>
-                          </div>
-                        )}
-                        {loteRepros.length > 0 && (
-                          <div className="border-t border-dashed border-orange-200 pt-2 text-[10px] text-indigo-700 font-medium">
-                            🔄 Reprocesado en turno: {loteRepros.map(r => r.nuevo_ticket_reprocesado).join(', ')}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+              <div className="overflow-x-auto rounded-xl border border-slate-200 mt-2">
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead className="bg-orange-50/50 text-orange-800 font-bold border-b border-orange-100">
+                    <tr>
+                      <th className="py-1.5 px-2.5">Código SAP</th>
+                      <th className="py-1.5 px-2.5">Descripción</th>
+                      <th className="py-1.5 px-2.5">Lote</th>
+                      <th className="py-1.5 px-2.5">Orden</th>
+                      <th className="py-1.5 px-2.5">Paletas</th>
+                      <th className="py-1.5 px-2.5">Camadas</th>
+                      <th className="py-1.5 px-2.5">Defecto General</th>
+                      <th className="py-1.5 px-2.5">NCA General</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {matchingPboLotes.map(l => {
+                      const lotePalets = pboPaletas.filter(p => p.id_pbo === l.id_pbo);
+                      const paletasCompletas = lotePalets.filter(p => p.camadas_sueltas === 0).length;
+                      const camadasSueltasTotal = lotePalets.reduce((acc, p) => acc + p.camadas_sueltas, 0);
+                      
+                      const catalogItem = CATALOGO_PRODUCTOS_PBO.find(c => c.nombre.toUpperCase() === l.producto.toUpperCase());
+                      const codigoSap = catalogItem ? catalogItem.codigo : 'N/D';
+                      
+                      return (
+                        <tr key={l.id_pbo} className="hover:bg-orange-50/20">
+                          <td className="py-1.5 px-2.5 font-bold font-mono text-slate-700">{codigoSap}</td>
+                          <td className="py-1.5 px-2.5 font-bold text-slate-800">{l.producto}</td>
+                          <td className="py-1.5 px-2.5 font-mono text-slate-600">{l.lote}</td>
+                          <td className="py-1.5 px-2.5 font-mono text-slate-600">{l.orden}</td>
+                          <td className="py-1.5 px-2.5 font-semibold text-center">{paletasCompletas}</td>
+                          <td className="py-1.5 px-2.5 font-semibold text-center">{camadasSueltasTotal}</td>
+                          <td className="py-1.5 px-2.5 italic text-slate-600">{l.defecto_general}</td>
+                          <td className="py-1.5 px-2.5 font-bold text-center">
+                            {lotePalets.length > 0 ? lotePalets[0].nca : 'N/D'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
-
           {/* 3. Desviaciones Sin Retención */}
           {desviaciones.length > 0 && (
             <div className="space-y-1.5">
@@ -781,42 +823,69 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                 7. Reprocesos realizados durante el turno
               </h3>
               
-              {/* DESKTOP/PRINT TABLE */}
               <div className="overflow-x-auto rounded-xl border border-slate-200 mt-2">
                 <table className="w-full text-left border-collapse text-[11px]">
                   <thead className="bg-indigo-50/50 text-indigo-800 font-bold border-b border-indigo-100">
                     <tr>
-                      <th className="py-1.5 px-2.5 w-[15%]">Folio PBO</th>
-                      <th className="py-1.5 px-2.5 w-[25%]">Tickets Involucrados</th>
-                      <th className="py-1.5 px-2.5 w-[20%]">Nuevo Ticket</th>
-                      <th className="py-1.5 px-2.5 w-[20%]">Estatus Calidad</th>
-                      <th className="py-1.5 px-2.5 w-[20%]">Estatus Logística</th>
+                      <th className="py-1.5 px-2.5">Código SAP</th>
+                      <th className="py-1.5 px-2.5">Orden</th>
+                      <th className="py-1.5 px-2.5">Lote</th>
+                      <th className="py-1.5 px-2.5">Tickets Reprocesados (Nuevos)</th>
+                      <th className="py-1.5 px-2.5">Total Generado</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-755">
-                    {matchingReprocesos.map((r, idx) => {
-                      const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
-                      return (
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {(() => {
+                      // Group by PBO (which gives us SAP, Orden, Lote)
+                      const groupedRepros: Record<string, {
+                        sap: string;
+                        orden: string;
+                        lote: string;
+                        tickets: string[];
+                        paletas: number;
+                        camadas: number;
+                      }> = {};
+
+                      matchingReprocesos.forEach(r => {
+                        const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
+                        if (!pboInfo) return;
+                        
+                        const catalogItem = CATALOGO_PRODUCTOS_PBO.find(c => c.nombre.toUpperCase() === pboInfo.producto.toUpperCase());
+                        const codigoSap = catalogItem ? catalogItem.codigo : 'N/D';
+                        const key = `${codigoSap}-${pboInfo.orden}-${pboInfo.lote}`;
+
+                        if (!groupedRepros[key]) {
+                          groupedRepros[key] = {
+                            sap: codigoSap,
+                            orden: pboInfo.orden,
+                            lote: pboInfo.lote,
+                            tickets: [],
+                            paletas: 0,
+                            camadas: 0
+                          };
+                        }
+
+                        if (r.nuevo_ticket_reprocesado && r.nuevo_ticket_reprocesado !== 'N/A') {
+                           groupedRepros[key].tickets.push(r.nuevo_ticket_reprocesado);
+                           groupedRepros[key].paletas += 1;
+                        }
+                        if (r.camadas_sueltas > 0) {
+                           groupedRepros[key].camadas += r.camadas_sueltas;
+                        }
+                      });
+
+                      return Object.values(groupedRepros).map((group, idx) => (
                         <tr key={idx} className="hover:bg-indigo-50/20">
-                          <td className="py-1.5 px-2.5 font-bold text-slate-800">
-                            {r.id_pbo} <br />
-                            <span className="text-[9px] font-mono text-slate-500 font-normal">Lote: {pboInfo?.lote || '—'}</span>
-                          </td>
-                          <td className="py-1.5 px-2.5 font-mono text-[10px] whitespace-normal break-words">{r.tickets_originales_consumidos}</td>
-                          <td className="py-1.5 px-2.5 font-mono font-bold text-indigo-600">{r.nuevo_ticket_reprocesado}</td>
-                          <td className="py-1.5 px-2.5">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.estatus_calidad === 'Aprobado' ? 'bg-emerald-100 text-emerald-700' : r.estatus_calidad === 'Rechazado' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {r.estatus_calidad}
-                            </span>
-                          </td>
-                          <td className="py-1.5 px-2.5">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.estatus_logistica === 'Confirmado' ? 'bg-emerald-100 text-emerald-700' : r.estatus_logistica === 'Inconsistencia' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {r.estatus_logistica}
-                            </span>
+                          <td className="py-1.5 px-2.5 font-bold font-mono">{group.sap}</td>
+                          <td className="py-1.5 px-2.5 font-mono">{group.orden}</td>
+                          <td className="py-1.5 px-2.5 font-mono">{group.lote}</td>
+                          <td className="py-1.5 px-2.5 font-mono text-indigo-700 font-semibold">{group.tickets.join(', ') || 'N/A'}</td>
+                          <td className="py-1.5 px-2.5 font-semibold text-slate-800">
+                            {group.paletas} Paletas, {group.camadas} Camadas
                           </td>
                         </tr>
-                      );
-                    })}
+                      ));
+                    })()}
                   </tbody>
                 </table>
               </div>

@@ -45,6 +45,7 @@ import TabRociadoras from './components/TabRociadoras';
 import TabResumen from './components/TabResumen';
 import TabHistorial from './components/TabHistorial';
 import TabConfiguracion from './components/TabConfiguracion';
+import { TabRoce } from './components/TabRoce';
 import TabPBO from './components/TabPBO';
 
 export default function App() {
@@ -56,7 +57,7 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [loginError, setLoginError] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'general' | 'calidad' | 'seguimiento' | 'rociadoras' | 'resumen' | 'historial' | 'configuracion'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'calidad' | 'seguimiento' | 'rociadoras' | 'roce' | 'resumen' | 'historial' | 'configuracion'>('general');
   const [dbConnected, setDbConnected] = useState(false);
 
   const handleAuthenticate = (pin: string): boolean => {
@@ -549,6 +550,14 @@ export default function App() {
               🎨 Rociadoras
             </button>
             <button
+              onClick={() => setActiveTab('roce')}
+              className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'roce' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              🔄 Roce
+            </button>
+            <button
               onClick={() => setActiveTab('resumen')}
               className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'resumen' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -679,6 +688,14 @@ export default function App() {
                     rociadoras={rociadoras}
                     onChangeRociadoras={setRociadoras}
                     editable={editable}
+                  />
+                )}
+
+                {activeTab === 'roce' && (
+                  <TabRoce
+                    cabeceraFecha={cabecera.fecha}
+                    cabeceraTurno={cabecera.turno}
+                    usuarioRegistro={currentRole === 'calidad' ? 'INSPECTOR CALIDAD' : 'OPERADOR'}
                   />
                 )}
 
