@@ -248,6 +248,7 @@ export default function TabGeneral({
         )}
       </div>
 
+
       {/* SECCION PRODUCTOS */}
       <div className="bg-white rounded-xl shadow-xs border border-slate-150 p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-slate-100 pb-3">

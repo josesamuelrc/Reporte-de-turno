@@ -2,7 +2,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Printer, AlertOctagon, AlertTriangle, CheckCircle, XCircle, Tag, Layers, FileText, ArrowRightLeft, FileCheck, Copy, Package, ShieldAlert, RotateCcw } from 'lucide-react';
 import { ReporteCompleto, LotePBO, Paleta, Reproceso } from '../types';
-import { getLotesPBO, getPaletasPBO, getReprocesosPBO } from '../db';
+import { getLotesPBO, getPaletasPBO, getReprocesosPBO, getSavedSupabaseConfig } from '../db';
 import { CATALOGO_PRODUCTOS_PBO } from './TabPBO';
 
 interface TabResumenProps {
@@ -15,6 +15,17 @@ export default function TabResumen({ reporte }: TabResumenProps) {
   const [pboLotes, setPboLotes] = useState<LotePBO[]>([]);
   const [pboPaletas, setPboPaletas] = useState<Paleta[]>([]);
   const [pboReprocesos, setPboReprocesos] = useState<Reproceso[]>([]);
+  const [logoSrc, setLogoSrc] = useState<string>('/logo.png');
+
+  useEffect(() => {
+    const config = getSavedSupabaseConfig();
+    if (config && config.url) {
+      const cleanUrl = config.url.replace(/\/$/, '');
+      setLogoSrc(`${cleanUrl}/storage/v1/object/public/logos/logo.png`);
+    } else {
+      setLogoSrc('/logo.png');
+    }
+  }, []);
 
   useEffect(() => {
     const loadPboData = async () => {
@@ -330,6 +341,18 @@ export default function TabResumen({ reporte }: TabResumenProps) {
         <div className="flex flex-row justify-between items-center pb-3 border-b border-slate-150 gap-4">
           <div className="flex items-center gap-2.5">
             {/* Elegant Logo Badge */}
+            <img 
+              src={logoSrc} 
+              alt="Logo" 
+              className="h-8 w-auto object-contain shrink-0" 
+              onError={(e) => { 
+                if (logoSrc !== '/logo.png') {
+                  setLogoSrc('/logo.png');
+                } else {
+                  (e.target as HTMLImageElement).style.display = 'none'; 
+                }
+              }} 
+            />
             <div className="bg-indigo-600 text-white font-black text-sm px-3 py-1.5 rounded-xl tracking-wider select-none border border-indigo-700">
               SE
             </div>
@@ -893,8 +916,7 @@ export default function TabResumen({ reporte }: TabResumenProps) {
           )}
 
           {/* 8. Colores de Rociadoras Activas */}
-          {rociadoras.length > 0 && (
-            <div className="space-y-1.5 pt-1">
+          {rociadoras.length > 0 && (            <div className="space-y-1.5 pt-1">
               <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
                 <Tag className="w-3.5 h-3.5 text-indigo-600" />
                 8. Colores de Rociadoras Activas

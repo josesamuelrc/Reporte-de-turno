@@ -23,7 +23,8 @@ import {
   eliminarReporte,
   getReportePorId, 
   isSupabaseConnected,
-  getLotesPBO
+  getLotesPBO,
+  getSavedSupabaseConfig
 } from './db';
 import { 
   ReporteTurno, 
@@ -59,6 +60,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<'general' | 'calidad' | 'seguimiento' | 'rociadoras' | 'roce' | 'resumen' | 'historial' | 'configuracion'>('general');
   const [dbConnected, setDbConnected] = useState(false);
+  const [logoSrc, setLogoSrc] = useState<string>('/logo.png');
 
   const handleAuthenticate = (pin: string): boolean => {
     if (pin === '501878') {
@@ -128,6 +130,15 @@ export default function App() {
   // Load analysts list and active borrador report on mount
   const loadInitialData = async () => {
     setDbConnected(isSupabaseConnected());
+    
+    // Resolve dynamic Supabase logo or local logo
+    const config = getSavedSupabaseConfig();
+    if (config && config.url) {
+      const cleanUrl = config.url.replace(/\/$/, '');
+      setLogoSrc(`${cleanUrl}/storage/v1/object/public/logos/logo.png`);
+    } else {
+      setLogoSrc('/logo.png');
+    }
     
     // Load analysts
     try {
@@ -421,6 +432,18 @@ export default function App() {
       <header className="bg-white text-slate-900 border-b border-slate-200 sticky top-0 z-40 print:hidden shadow-xs h-auto sm:h-16 py-3 sm:py-0 flex items-center">
         <div className="max-w-7xl mx-auto w-full px-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
+            <img 
+              src={logoSrc} 
+              alt="Logo" 
+              className="h-8 sm:h-10 w-auto object-contain shrink-0" 
+              onError={(e) => { 
+                if (logoSrc !== '/logo.png') {
+                  setLogoSrc('/logo.png');
+                } else {
+                  (e.target as HTMLImageElement).style.display = 'none'; 
+                }
+              }} 
+            />
             <div className="bg-indigo-600 text-white font-extrabold text-sm px-3 py-1.5 rounded-xl tracking-wider shadow-lg shadow-indigo-100 shrink-0">
               SE
             </div>
