@@ -48,6 +48,7 @@ import TabHistorial from './components/TabHistorial';
 import TabConfiguracion from './components/TabConfiguracion';
 import { TabRoce } from './components/TabRoce';
 import TabPBO from './components/TabPBO';
+import CompanyLogo from './components/CompanyLogo';
 
 export default function App() {
   // Navigation & Security State
@@ -432,18 +433,7 @@ export default function App() {
       <header className="bg-white text-slate-900 border-b border-slate-200 sticky top-0 z-40 print:hidden shadow-xs h-auto sm:h-16 py-3 sm:py-0 flex items-center">
         <div className="max-w-7xl mx-auto w-full px-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
-            <img 
-              src={logoSrc} 
-              alt="Logo" 
-              className="h-8 sm:h-10 w-auto object-contain shrink-0" 
-              onError={(e) => { 
-                if (logoSrc !== '/logo.png') {
-                  setLogoSrc('/logo.png');
-                } else {
-                  (e.target as HTMLImageElement).style.display = 'none'; 
-                }
-              }} 
-            />
+            <CompanyLogo className="h-8 sm:h-10 w-auto object-contain shrink-0" />
             <div className="bg-indigo-600 text-white font-extrabold text-sm px-3 py-1.5 rounded-xl tracking-wider shadow-lg shadow-indigo-100 shrink-0">
               SE
             </div>

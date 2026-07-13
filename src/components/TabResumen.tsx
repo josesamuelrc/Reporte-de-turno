@@ -4,6 +4,7 @@ import { Printer, AlertOctagon, AlertTriangle, CheckCircle, XCircle, Tag, Layers
 import { ReporteCompleto, LotePBO, Paleta, Reproceso } from '../types';
 import { getLotesPBO, getPaletasPBO, getReprocesosPBO, getSavedSupabaseConfig } from '../db';
 import { CATALOGO_PRODUCTOS_PBO } from './TabPBO';
+import CompanyLogo from './CompanyLogo';
 
 interface TabResumenProps {
   reporte: ReporteCompleto | null;
@@ -341,18 +342,7 @@ export default function TabResumen({ reporte }: TabResumenProps) {
         <div className="flex flex-row justify-between items-center pb-3 border-b border-slate-150 gap-4">
           <div className="flex items-center gap-2.5">
             {/* Elegant Logo Badge */}
-            <img 
-              src={logoSrc} 
-              alt="Logo" 
-              className="h-8 w-auto object-contain shrink-0" 
-              onError={(e) => { 
-                if (logoSrc !== '/logo.png') {
-                  setLogoSrc('/logo.png');
-                } else {
-                  (e.target as HTMLImageElement).style.display = 'none'; 
-                }
-              }} 
-            />
+            <CompanyLogo className="h-8 w-auto object-contain shrink-0" />
             <div className="bg-indigo-600 text-white font-black text-sm px-3 py-1.5 rounded-xl tracking-wider select-none border border-indigo-700">
               SE
             </div>
