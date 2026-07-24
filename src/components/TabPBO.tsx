@@ -753,13 +753,30 @@ export default function TabPBO({
       let updatedPaletas = [...paletas];
       const paletasToSaveList: Paleta[] = [];
 
+      // 1. Update all selected original tickets to "Reprocesado" to discount them
+      for (const tktOriginal of selectedOriginalTickets) {
+        const existingPaletaIdx = updatedPaletas.findIndex(p => p.id_pbo === selectedLoteId && p.nro_ticket.toUpperCase() === tktOriginal.toUpperCase());
+        if (existingPaletaIdx !== -1) {
+          updatedPaletas[existingPaletaIdx] = {
+            ...updatedPaletas[existingPaletaIdx],
+            estatus: 'Reprocesado' as const
+          };
+          paletasToSaveList.push(updatedPaletas[existingPaletaIdx]);
+        }
+      }
+
+      // 2. Save new reprocess outputs (new tickets generated)
+      const consumedTicketsStr = selectedOriginalTickets.length > 0 
+        ? selectedOriginalTickets.join(', ') 
+        : (reproForm.tickets_originales_consumidos || 'N/A');
+
       for (let i = 0; i < inputTickets.length; i++) {
         const tkt = inputTickets[i];
         const reproId = `REP-${Date.now()}-${i}`;
         const nuevoRep: Reproceso = {
           id: reproId,
           id_pbo: selectedLoteId,
-          tickets_originales_consumidos: tkt,
+          tickets_originales_consumidos: consumedTicketsStr,
           nuevo_ticket_reprocesado: tkt,
           camadas_sueltas: reproForm.camadas_sueltas || 0,
           paletas_nuevas: reproForm.paletas_nuevas || 0,
@@ -772,33 +789,6 @@ export default function TabPBO({
         };
         
         await saveReprocesoPBO(nuevoRep);
-
-        // Update corresponding paleta to "Reprocesado"
-        const existingPaletaIdx = updatedPaletas.findIndex(p => p.id_pbo === selectedLoteId && p.nro_ticket.toUpperCase() === tkt);
-        if (existingPaletaIdx !== -1) {
-          updatedPaletas[existingPaletaIdx] = {
-            ...updatedPaletas[existingPaletaIdx],
-            estatus: 'Reprocesado' as const,
-            camadas_sueltas: reproForm.camadas_sueltas || 0,
-            paletas_nuevas: reproForm.paletas_nuevas || 0
-          };
-          paletasToSaveList.push(updatedPaletas[existingPaletaIdx]);
-        } else {
-          // Auto-create quarantine paleta if they entered a custom or new ticket
-          const newPaleta: Paleta = {
-            id: `${selectedLoteId}-P${updatedPaletas.filter(p => p.id_pbo === selectedLoteId).length + 1 + i}`,
-            id_pbo: selectedLoteId,
-            nro_ticket: tkt,
-            camadas_sueltas: reproForm.camadas_sueltas || 0,
-            paletas_nuevas: reproForm.paletas_nuevas || 0,
-            defecto: 'Reproceso registrado',
-            nca: '2.5',
-            estatus: 'Reprocesado' as const,
-            creado_el: new Date().toISOString()
-          };
-          updatedPaletas.push(newPaleta);
-          paletasToSaveList.push(newPaleta);
-        }
       }
 
       if (paletasToSaveList.length > 0) {
@@ -1158,11 +1148,16 @@ export default function TabPBO({
     .reduce((acc, curr) => {
       const parent = lotes.find(l => l.id_pbo === curr.id_pbo);
       if (!parent) return acc;
-      // If we obtain repro tickets, each ticket usually represents a full palet unless specified
-      if (curr.camadas_sueltas > 0) {
-        return acc + (curr.camadas_sueltas * getCansPerCamada());
+      let cans = 0;
+      if (curr.paletas_nuevas !== undefined && curr.paletas_nuevas > 0) {
+        cans += curr.paletas_nuevas * getCansPerPallet(parent.formato);
+      } else if (!curr.camadas_sueltas) {
+        cans += getCansPerPallet(parent.formato);
       }
-      return acc + getCansPerPallet(parent.formato);
+      if (curr.camadas_sueltas > 0) {
+        cans += curr.camadas_sueltas * getCansPerCamada();
+      }
+      return acc + cans;
     }, 0);
 
   const totalCansLiberated = totalCansLiberatedDirect + totalCansApprovedRepro;

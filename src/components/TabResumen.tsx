@@ -218,8 +218,8 @@ export default function TabResumen({ reporte }: TabResumenProps) {
         }
         if (r.nuevo_ticket_reprocesado && r.nuevo_ticket_reprocesado !== 'N/A') {
            groupedRepros[key].tickets.push(r.nuevo_ticket_reprocesado);
-           groupedRepros[key].paletas += 1;
         }
+        groupedRepros[key].paletas += (r.paletas_nuevas !== undefined ? r.paletas_nuevas : 1);
         if (r.camadas_sueltas > 0) {
            groupedRepros[key].camadas += r.camadas_sueltas;
         }
@@ -879,8 +879,8 @@ export default function TabResumen({ reporte }: TabResumenProps) {
 
                         if (r.nuevo_ticket_reprocesado && r.nuevo_ticket_reprocesado !== 'N/A') {
                            groupedRepros[key].tickets.push(r.nuevo_ticket_reprocesado);
-                           groupedRepros[key].paletas += 1;
                         }
+                        groupedRepros[key].paletas += (r.paletas_nuevas !== undefined ? r.paletas_nuevas : 1);
                         if (r.camadas_sueltas > 0) {
                            groupedRepros[key].camadas += r.camadas_sueltas;
                         }
