@@ -770,26 +770,24 @@ export default function TabPBO({
         ? selectedOriginalTickets.join(', ') 
         : (reproForm.tickets_originales_consumidos || 'N/A');
 
-      for (let i = 0; i < inputTickets.length; i++) {
-        const tkt = inputTickets[i];
-        const reproId = `REP-${Date.now()}-${i}`;
-        const nuevoRep: Reproceso = {
-          id: reproId,
-          id_pbo: selectedLoteId,
-          tickets_originales_consumidos: consumedTicketsStr,
-          nuevo_ticket_reprocesado: tkt,
-          camadas_sueltas: reproForm.camadas_sueltas || 0,
-          paletas_nuevas: reproForm.paletas_nuevas || 0,
-          estatus_calidad: 'Aprobado',
-          estatus_logistica: 'Confirmado',
-          usuario_registro: usuarioRegistro || 'CALIDAD (REPROCESO)',
-          creado_el: new Date().toISOString(),
-          fecha_registro: cabeceraFecha,
-          turno_registro: cabeceraTurno
-        };
-        
-        await saveReprocesoPBO(nuevoRep);
-      }
+      const ticketsGeneradosStr = inputTickets.join(', ');
+      const reproId = `REP-${Date.now()}`;
+      const nuevoRep: Reproceso = {
+        id: reproId,
+        id_pbo: selectedLoteId,
+        tickets_originales_consumidos: consumedTicketsStr,
+        nuevo_ticket_reprocesado: ticketsGeneradosStr,
+        camadas_sueltas: reproForm.camadas_sueltas || 0,
+        paletas_nuevas: reproForm.paletas_nuevas || 0,
+        estatus_calidad: 'Aprobado',
+        estatus_logistica: 'Confirmado',
+        usuario_registro: usuarioRegistro || 'CALIDAD (REPROCESO)',
+        creado_el: new Date().toISOString(),
+        fecha_registro: cabeceraFecha,
+        turno_registro: cabeceraTurno
+      };
+      
+      await saveReprocesoPBO(nuevoRep);
 
       if (paletasToSaveList.length > 0) {
         await savePaletasPBO(paletasToSaveList);
@@ -807,7 +805,7 @@ export default function TabPBO({
       });
       setSelectedOriginalTickets([]);
       setRefreshTrigger(p => p + 1);
-      alert(`¡Se registraron ${inputTickets.length} paletas/camadas de reproceso con éxito!`);
+      alert(`¡Se registró el reproceso con éxito!`);
     } catch (err) {
       console.error(err);
       alert("Error al registrar reproceso.");
@@ -2189,9 +2187,6 @@ export default function TabPBO({
                                   <th className="py-2.5 px-3">Tickets Generados</th>
                                   <th className="py-2.5 px-3 text-center">Paletas</th>
                                   <th className="py-2.5 px-3 text-center">Camadas</th>
-                                  <th className="py-2.5 px-3">Tickets Originales Consumidos</th>
-                                  <th className="py-2.5 px-3">Status Calidad</th>
-                                  <th className="py-2.5 px-3">Status Logística</th>
                                   <th className="py-2.5 px-3 text-right">Acciones</th>
                                 </tr>
                               </thead>
@@ -2227,37 +2222,6 @@ export default function TabPBO({
                                             className="w-16 bg-white border border-slate-200 rounded p-1 text-center text-xs font-semibold"
                                           />
                                         </td>
-                                        <td className="py-2 px-3">
-                                          <input
-                                            type="text"
-                                            value={editingRepro.tickets_originales_consumidos}
-                                            onChange={(e) => setEditingRepro({ ...editingRepro, tickets_originales_consumidos: e.target.value.toUpperCase() })}
-                                            className="w-full bg-white border border-slate-200 rounded p-1 font-mono text-xs"
-                                          />
-                                        </td>
-                                        <td className="py-2 px-3">
-                                          <select
-                                            value={editingRepro.estatus_calidad}
-                                            onChange={(e) => setEditingRepro({ ...editingRepro, estatus_calidad: e.target.value as any })}
-                                            className="bg-white border border-slate-200 rounded p-1 text-xs font-bold"
-                                          >
-                                            <option value="Aprobado">Aprobado</option>
-                                            <option value="Rechazado">Rechazado</option>
-                                            <option value="Chequeado por Calidad">Chequeado por Calidad</option>
-                                            <option value="En Control de Calidad">En Control de Calidad</option>
-                                          </select>
-                                        </td>
-                                        <td className="py-2 px-3">
-                                          <select
-                                            value={editingRepro.estatus_logistica}
-                                            onChange={(e) => setEditingRepro({ ...editingRepro, estatus_logistica: e.target.value as any })}
-                                            className="bg-white border border-slate-200 rounded p-1 text-xs font-bold"
-                                          >
-                                            <option value="Confirmado">Confirmado</option>
-                                            <option value="Inconsistencia">Inconsistencia</option>
-                                            <option value="En espera">En espera</option>
-                                          </select>
-                                        </td>
                                         <td className="py-2 px-3 text-right">
                                           <div className="flex justify-end gap-1.5">
                                             <button
@@ -2283,29 +2247,6 @@ export default function TabPBO({
                                       <td className="py-2 px-3 font-mono font-bold text-indigo-700">{r.nuevo_ticket_reprocesado}</td>
                                       <td className="py-2 px-3 text-center font-semibold">{r.paletas_nuevas ?? 0}</td>
                                       <td className="py-2 px-3 text-center font-semibold">{r.camadas_sueltas || '0'}</td>
-                                      <td className="py-2 px-3 font-mono text-slate-500">{r.tickets_originales_consumidos}</td>
-                                      <td className="py-2 px-3">
-                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                          r.estatus_calidad === 'Aprobado' || r.estatus_calidad === 'Chequeado por Calidad'
-                                            ? 'bg-emerald-100 text-emerald-800' 
-                                            : r.estatus_calidad === 'Rechazado' 
-                                              ? 'bg-red-100 text-red-800' 
-                                              : 'bg-amber-100 text-amber-800'
-                                        }`}>
-                                          {r.estatus_calidad}
-                                        </span>
-                                      </td>
-                                      <td className="py-2 px-3">
-                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                          r.estatus_logistica === 'Confirmado' 
-                                            ? 'bg-emerald-100 text-emerald-800' 
-                                            : r.estatus_logistica === 'Inconsistencia' 
-                                              ? 'bg-red-100 text-red-800' 
-                                              : 'bg-slate-200 text-slate-700'
-                                        }`}>
-                                          {r.estatus_logistica}
-                                        </span>
-                                      </td>
                                       <td className="py-2 px-3 text-right">
                                         {currentRole === 'calidad' && (
                                           <div className="flex justify-end gap-1.5">

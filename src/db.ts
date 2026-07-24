@@ -867,6 +867,11 @@ export const getSqlSchema = (): string => {
 ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS hacia_adelante BOOLEAN DEFAULT FALSE;
 ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS hacia_atras BOOLEAN DEFAULT FALSE;
 ALTER TABLE pbo_paletas ALTER COLUMN nca TYPE TEXT;
+
+-- MIGRACIÓN PARA REPROCESOS PBO
+ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS paletas_nuevas INTEGER DEFAULT 0;
+ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS fecha_registro TEXT;
+ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS turno_registro INTEGER;
 -- ALTER TABLE identificacion_rociadoras ADD COLUMN IF NOT EXISTS hora TEXT;
 -- ALTER TABLE desviaciones_sin_retencion ADD COLUMN IF NOT EXISTS hora TEXT;
 -- ALTER TABLE desviaciones_sin_retencion ADD COLUMN IF NOT EXISTS tipo TEXT;
@@ -1056,11 +1061,14 @@ CREATE TABLE IF NOT EXISTS pbo_reprocesos (
     id_pbo TEXT NOT NULL REFERENCES pbo_lotes(id_pbo) ON DELETE CASCADE,
     tickets_originales_consumidos TEXT NOT NULL,
     nuevo_ticket_reprocesado TEXT NOT NULL,
+    paletas_nuevas INTEGER,
     camadas_sueltas INTEGER NOT NULL,
     estatus_calidad TEXT NOT NULL,
     estatus_logistica TEXT NOT NULL,
     usuario_registro TEXT NOT NULL,
-    creado_el TEXT NOT NULL
+    creado_el TEXT NOT NULL,
+    fecha_registro TEXT,
+    turno_registro INTEGER
 );
 
 -- Desactivar Seguridad de Fila (RLS) para permitir lectura/escritura pública con la key anónima de Supabase
