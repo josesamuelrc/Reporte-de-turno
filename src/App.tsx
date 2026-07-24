@@ -54,7 +54,7 @@ export default function App() {
   // Navigation & Security State
   const [activeModule, setActiveModule] = useState<'inspeccion' | 'pbo'>('inspeccion');
   const [currentRole, setCurrentRole] = useState<'public' | 'calidad' | 'logistica'>(() => {
-    return (localStorage.getItem('pbo_user_role') as any) || 'public';
+    return 'calidad';
   });
   const [pinInput, setPinInput] = useState('');
   const [loginError, setLoginError] = useState(false);
@@ -63,24 +63,27 @@ export default function App() {
   const [dbConnected, setDbConnected] = useState(false);
   const [logoSrc, setLogoSrc] = useState<string>('/logo.png');
 
+  // Warning when reloading the page to prevent unsaved data loss
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '¿Desea guardar lo registrado? Se perderán los datos si recarga la página.';
+      return e.returnValue;
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+
   const handleAuthenticate = (pin: string): boolean => {
-    if (pin === '501878') {
-      setCurrentRole('calidad');
-      localStorage.setItem('pbo_user_role', 'calidad');
-      setLoginError(false);
-      return true;
-    } else if (pin === '501877') {
-      setCurrentRole('logistica');
-      localStorage.setItem('pbo_user_role', 'logistica');
-      setLoginError(false);
-      return true;
-    }
-    return false;
+    setCurrentRole('calidad');
+    setLoginError(false);
+    return true;
   };
 
   const handleLogout = () => {
-    setCurrentRole('public');
-    localStorage.setItem('pbo_user_role', 'public');
+    setCurrentRole('calidad');
     setActiveModule('pbo');
   };
 
@@ -586,14 +589,6 @@ export default function App() {
             >
               <History className="w-3.5 h-3.5" /> Historial de Turnos
             </button>
-            <button
-              onClick={() => setActiveTab('configuracion')}
-              className={`py-4 px-5 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'configuracion' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10' : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Settings className="w-3.5 h-3.5" /> Configuración
-            </button>
           </div>
         </nav>
       )}
@@ -610,62 +605,18 @@ export default function App() {
               cabeceraTurno={cabecera.turno}
             />
           ) : (
-            // Inspección de turno module
-            currentRole !== 'calidad' ? (
-              /* GORGEOUS CALIDAD LOCK SCREEN */
-              <div className="max-w-md mx-auto my-12 bg-white rounded-3xl border border-slate-200 p-8 shadow-xl text-center space-y-6">
-                <div className="bg-rose-50 text-rose-650 p-4 rounded-full w-16 h-16 mx-auto flex items-center justify-center">
-                  <Lock className="w-8 h-8 text-rose-600" />
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-850">Módulo Restringido: Inspección de Turno</h3>
-                  <p className="text-xs text-slate-500 mt-2 leading-relaxed font-medium">
-                    Este panel contiene parámetros técnicos de producción, identificación de rociadoras e incidentes de turno. Requiere autenticación de Calidad para continuar.
-                  </p>
-                </div>
-                <form onSubmit={(e) => {
-                  e.preventDefault();
-                  const success = handleAuthenticate(pinInput);
-                  if (success) {
-                    setPinInput('');
-                    setLoginError(false);
-                  } else {
-                    setLoginError(true);
-                  }
-                }} className="space-y-4">
-                  <div>
-                    <input
-                      type="password"
-                      placeholder="Ingrese Clave de Seguridad..."
-                      value={pinInput}
-                      onChange={(e) => setPinInput(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-250 rounded-xl px-4 py-2.5 text-center text-sm font-semibold tracking-widest focus:outline-hidden focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition-all text-slate-800"
-                    />
-                    {loginError && (
-                      <span className="text-[10px] text-rose-600 font-extrabold uppercase mt-1.5 block tracking-wider">Clave de seguridad incorrecta</span>
-                    )}
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-3 rounded-xl transition-all shadow-md shadow-indigo-100 cursor-pointer"
-                  >
-                    Desbloquear Panel de Calidad
-                  </button>
-                </form>
-              </div>
-            ) : (
-              /* TRADITIONAL INSPECTION TABS */
-              <>
-                {activeTab === 'general' && (
-                  <TabGeneral 
-                    cabecera={cabecera}
-                    onChangeCabecera={(c) => setCabecera(prev => ({ ...prev, ...c }))}
-                    productos={productos}
-                    onChangeProductos={setProductos}
-                    analistas={analistas}
-                    editable={editable}
-                  />
-                )}
+            /* TRADITIONAL INSPECTION TABS */
+            <>
+              {activeTab === 'general' && (
+                <TabGeneral 
+                  cabecera={cabecera}
+                  onChangeCabecera={(c) => setCabecera(prev => ({ ...prev, ...c }))}
+                  productos={productos}
+                  onChangeProductos={setProductos}
+                  analistas={analistas}
+                  editable={editable}
+                />
+              )}
 
                 {activeTab === 'calidad' && (
                   <TabCalidad
@@ -734,10 +685,9 @@ export default function App() {
                   />
                 )}
               </>
-            )
-          )}
-        </div>
-      </main>
+            )}
+          </div>
+        </main>
 
       {/* FOOTER ACTION BAR (Hidden when printing) */}
       {activeModule === 'inspeccion' && currentRole === 'calidad' && (

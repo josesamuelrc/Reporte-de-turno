@@ -340,16 +340,16 @@ export default function TabResumen({ reporte }: TabResumenProps) {
         
         {/* BRAND & HEADER BLOCK */}
         <div className="flex flex-row justify-between items-center pb-3 border-b border-slate-150 gap-4">
-          <div className="flex items-center gap-3">
-            {/* Elegant Logo Badge */}
-            <CompanyLogo className="h-10 sm:h-12 w-auto object-contain shrink-0" />
-            <div className="bg-indigo-600 text-white font-black text-sm px-3 py-1.5 rounded-xl tracking-wider select-none border border-indigo-700">
-              SE
-            </div>
+          <div className="flex items-center gap-4">
+            {/* Elegant Logo Badge - Large on the left */}
+            <CompanyLogo className="h-12 sm:h-16 w-auto object-contain shrink-0" />
             <div>
-              <h1 className="text-base sm:text-2xl font-black text-slate-800 tracking-tight uppercase leading-none">
+              <h1 className="text-xl sm:text-3xl font-black text-slate-900 tracking-tight uppercase leading-none">
                 Reporte de Turno
               </h1>
+              <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mt-1">
+                Control de Calidad
+              </p>
             </div>
           </div>
           

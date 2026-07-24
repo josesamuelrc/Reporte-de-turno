@@ -309,7 +309,7 @@ export default function TabPBO({
   const [generatedTicketInputs, setGeneratedTicketInputs] = useState<string[]>([]);
 
   // Username registry identification
-  const [usuarioRegistro, setUsuarioRegistro] = useState<string>(() => localStorage.getItem('usuario_registro_pbo') || '');
+  const [usuarioRegistro, setUsuarioRegistro] = useState<string>(() => localStorage.getItem('usuario_registro_pbo') || 'OPERADOR');
   const [modalPaletas, setModalPaletas] = useState<{
     index: number;
     nro_ticket: string;
@@ -322,6 +322,7 @@ export default function TabPBO({
   const [filterDate, setFilterDate] = useState('');
   const [filterTurno, setFilterTurno] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [sidebarTab, setSidebarTab] = useState<'activos' | 'concluidos'>('activos');
 
   // Active PBO selection for details view / editing
   const [selectedLoteId, setSelectedLoteId] = useState<string | null>(null);
@@ -663,37 +664,31 @@ export default function TabPBO({
     }
     if (!selectedLoteId) return;
 
-    if (!reproForm.tickets_originales_consumidos) {
-      alert("Debe indicar qué tickets se consumieron.");
+    if (!reproForm.nuevo_ticket_reprocesado) {
+      alert("Debe indicar el número de ticket correspondente.");
       return;
     }
-    if (reproForm.paletas_nuevas > 0 && !reproForm.nuevo_ticket_reprocesado) {
-      alert("Debe indicar el nuevo ticket generado para la paleta.");
-      return;
-    }
+
+    const inputTicket = reproForm.nuevo_ticket_reprocesado.trim().toUpperCase();
 
     const reproId = `REP-${Date.now()}`;
     const nuevoRep: Reproceso = {
       id: reproId,
       id_pbo: selectedLoteId,
-      tickets_originales_consumidos: reproForm.tickets_originales_consumidos,
-      nuevo_ticket_reprocesado: reproForm.nuevo_ticket_reprocesado || 'N/A',
-      camadas_sueltas: reproForm.camadas_sueltas,
-      estatus_calidad: 'Chequeado por Calidad',
-      estatus_logistica: 'En espera',
-      usuario_registro: 'CALIDAD (REPROCESO)',
+      tickets_originales_consumidos: inputTicket,
+      nuevo_ticket_reprocesado: inputTicket,
+      camadas_sueltas: reproForm.camadas_sueltas || 0,
+      estatus_calidad: 'Aprobado',
+      estatus_logistica: 'Confirmado',
+      usuario_registro: usuarioRegistro || 'CALIDAD (REPROCESO)',
       creado_el: new Date().toISOString(),
       fecha_registro: cabeceraFecha,
       turno_registro: cabeceraTurno
     };
 
-    // Update the consumed original paletas to "Reprocesado" state
-    const consumedNumbers = reproForm.tickets_originales_consumidos
-      .split(',')
-      .map(s => s.trim().toUpperCase());
-
+    // Update the corresponding original paleta to "Reprocesado" state
     const updatedPaletas = paletas.map(p => {
-      if (p.id_pbo === selectedLoteId && consumedNumbers.includes(p.nro_ticket.toUpperCase())) {
+      if (p.id_pbo === selectedLoteId && p.nro_ticket.toUpperCase() === inputTicket) {
         return { ...p, estatus: 'Reprocesado' as const };
       }
       return p;
@@ -701,10 +696,26 @@ export default function TabPBO({
 
     try {
       await saveReprocesoPBO(nuevoRep);
+      
       // Save updated original paletas
-      const loteConsumedPaletas = updatedPaletas.filter(p => p.id_pbo === selectedLoteId && p.estatus === 'Reprocesado');
+      const loteConsumedPaletas = updatedPaletas.filter(p => p.id_pbo === selectedLoteId && p.nro_ticket.toUpperCase() === inputTicket);
       if (loteConsumedPaletas.length > 0) {
         await savePaletasPBO(loteConsumedPaletas);
+        setPaletas(updatedPaletas);
+      } else {
+        // Auto-create quarantine paleta if they entered a custom or new ticket
+        const newPaleta: Paleta = {
+          id: `${selectedLoteId}-P${paletas.filter(p => p.id_pbo === selectedLoteId).length + 1}`,
+          id_pbo: selectedLoteId,
+          nro_ticket: inputTicket,
+          camadas_sueltas: reproForm.camadas_sueltas || 0,
+          defecto: 'Reproceso registrado',
+          nca: '2.5',
+          estatus: 'Reprocesado' as const,
+          creado_el: new Date().toISOString()
+        };
+        await savePaletasPBO([newPaleta]);
+        setPaletas([...paletas, newPaleta]);
       }
       
       await checkAndAutoCloseLote(selectedLoteId);
@@ -715,8 +726,9 @@ export default function TabPBO({
         paletas_nuevas: 0,
         camadas_sueltas: 0,
       });
+      setSelectedOriginalTickets([]);
       setRefreshTrigger(p => p + 1);
-      alert(`¡Lote de reproceso registrado! Las paletas originales consumidas se marcaron como 'Reprocesado'. El nuevo ticket ${nuevoRep.nuevo_ticket_reprocesado} ha quedado 'En Control de Calidad'.`);
+      alert(`¡Lote de reproceso registrado! El ticket ${inputTicket} ha sido marcado como 'Reprocesado'.`);
     } catch (err) {
       console.error(err);
       alert("Error al registrar reproceso.");
@@ -840,37 +852,24 @@ export default function TabPBO({
   const checkAndAutoCloseLote = async (id: string) => {
     try {
       const latestPaletas = await getPaletasPBO();
-      const latestRepros = await getReprocesosPBO();
       const latestLotes = await getLotesPBO();
 
       const lotObj = latestLotes.find(l => l.id_pbo === id);
       if (!lotObj) return;
 
       const lotPaletas = latestPaletas.filter(p => p.id_pbo === id);
-      const lotRepros = latestRepros.filter(r => r.id_pbo === id);
-
       if (lotPaletas.length === 0) return;
 
       // Checks:
-      // 1. Any pallet is still "Sin reprocesar"
+      // Any pallet is still "Sin reprocesar"
       const hasPendingPalets = lotPaletas.some(p => p.estatus === 'Sin reprocesar');
 
-      // 2. All reprocesos in this PBO are approved/confirmed
-      const hasReprocesos = lotRepros.length > 0;
-      const allReprosApproved = lotRepros.every(r => 
-        r.estatus_calidad === 'Aprobado' && r.estatus_logistica === 'Confirmado'
-      );
-
-      // What if there are reprocessed pallets, but no reproceso record? That shouldn't happen,
-      // but if there are reprocessed pallets, we need approved/confirmed reprocesos.
-      const reprocessedPalets = lotPaletas.filter(p => p.estatus === 'Reprocesado');
-      const reprocesosAreValid = reprocessedPalets.length === 0 || (hasReprocesos && allReprosApproved);
-
-      const shouldClose = !hasPendingPalets && reprocesosAreValid;
+      const shouldClose = !hasPendingPalets;
 
       if (shouldClose && lotObj.estatus_general === 'Abierto') {
         const updatedLote: LotePBO = { ...lotObj, estatus_general: 'Cerrado' };
         await saveLotePBO(updatedLote);
+        alert(`🎉 ¡Atención!\n\nSe ha completado el reproceso de todo el material del lote con folio "${id}". Todos los tickets pendientes han sido reprocesados exitosamente. El PBO ha sido culminado y archivado.`);
       } else if (!shouldClose && lotObj.estatus_general === 'Cerrado') {
         const updatedLote: LotePBO = { ...lotObj, estatus_general: 'Abierto' };
         await saveLotePBO(updatedLote);
@@ -1316,48 +1315,6 @@ export default function TabPBO({
     link.click();
   };
 
-  if (!usuarioRegistro) {
-    return (
-      <div className="max-w-md mx-auto my-12 bg-white rounded-3xl border border-slate-200 p-8 shadow-xl text-center space-y-6">
-        <div className="bg-orange-50 text-orange-600 p-4 rounded-full w-16 h-16 mx-auto flex items-center justify-center animate-pulse">
-          <ClipboardList className="w-8 h-8 text-orange-600" />
-        </div>
-        <div>
-          <h3 className="text-base font-extrabold text-slate-800">Identificación del Operador PBO</h3>
-          <p className="text-xs text-slate-500 mt-2 leading-relaxed font-medium">
-            Por favor ingrese su Nombre de Usuario o Analista para iniciar operaciones y registrar su firma en el módulo de PBO.
-          </p>
-        </div>
-        <form onSubmit={(e) => {
-          e.preventDefault();
-          const inputName = (e.currentTarget.elements.namedItem('usernameInput') as HTMLInputElement).value.trim();
-          if (inputName) {
-            setUsuarioRegistro(inputName);
-            localStorage.setItem('usuario_registro_pbo', inputName);
-          } else {
-            alert('Por favor ingrese un nombre de usuario válido.');
-          }
-        }} className="space-y-4">
-          <div>
-            <input
-              name="usernameInput"
-              type="text"
-              required
-              placeholder="Ej: BRUNO MUÑOZ"
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-center text-xs font-bold uppercase tracking-wider focus:outline-hidden focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all text-slate-800"
-            />
-          </div>
-          <button
-            type="submit"
-            className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs py-3 rounded-xl transition-all shadow-md shadow-orange-100 cursor-pointer"
-          >
-            Ingresar al Módulo de PBO
-          </button>
-        </form>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       
@@ -1373,59 +1330,22 @@ export default function TabPBO({
           </div>
         </div>
 
-        {/* Security Role Selector / Login Widget */}
-        <div className="flex items-center gap-3 bg-slate-800/80 border border-slate-700/60 p-3 rounded-2xl">
-          <div className="flex items-center gap-2 mr-1 border-r border-slate-700 pr-3">
-            <span className="text-[10px] font-black uppercase text-slate-400 block mr-1.5">Operador:</span>
-            <span className="text-xs font-extrabold text-orange-400 uppercase">{usuarioRegistro}</span>
-            <button
-              onClick={() => {
-                setUsuarioRegistro('');
-                localStorage.removeItem('usuario_registro_pbo');
+        {/* Simplified Analista Identification */}
+        <div className="flex items-center gap-3 bg-slate-800/80 border border-slate-700/60 p-3 rounded-2xl shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black uppercase text-slate-400 block">Analista:</span>
+            <input
+              type="text"
+              value={usuarioRegistro}
+              onChange={(e) => {
+                const val = e.target.value;
+                setUsuarioRegistro(val);
+                localStorage.setItem('usuario_registro_pbo', val);
               }}
-              className="text-[9px] text-slate-300 hover:text-white font-bold bg-slate-900 hover:bg-slate-950 px-2 py-0.5 rounded-sm ml-2 transition-all border border-slate-800"
-            >
-              Cambiar
-            </button>
+              placeholder="Ingrese su nombre..."
+              className="bg-slate-950 border border-slate-700 rounded px-2.5 py-1 text-xs font-bold text-orange-400 uppercase focus:outline-hidden focus:ring-1 focus:ring-orange-500 w-36 sm:w-44"
+            />
           </div>
-          {currentRole === 'public' ? (
-            <div className="flex flex-col sm:flex-row items-center gap-2">
-              <span className="text-xs text-amber-400 font-bold flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 rounded-lg">
-                <Lock className="w-3.5 h-3.5" /> Consulta Libre (Público)
-              </span>
-              <form onSubmit={handleAuthSubmit} className="flex items-center gap-1.5 mt-2 sm:mt-0">
-                <input
-                  type="password"
-                  placeholder="PIN de Seguridad"
-                  value={pinInput}
-                  onChange={(e) => setPinInput(e.target.value)}
-                  className="bg-slate-900 border border-slate-600 text-xs text-white rounded-lg px-2.5 py-1.5 w-32 focus:outline-hidden focus:ring-2 focus:ring-orange-500"
-                />
-                <button
-                  type="submit"
-                  className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer"
-                >
-                  Acceder
-                </button>
-              </form>
-              {authError && (
-                <span className="text-[10px] text-red-400 font-black uppercase tracking-wider block mt-1">Clave incorrecta</span>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
-                <Unlock className="w-4 h-4" /> 
-                SESIÓN: {currentRole === 'calidad' ? '🔬 CALIDAD' : '📦 LOGÍSTICA'}
-              </span>
-              <button
-                onClick={onLogout}
-                className="text-xs text-rose-400 hover:text-white hover:bg-rose-950/40 px-2.5 py-1.5 rounded-lg font-bold transition-all border border-rose-500/20 cursor-pointer"
-              >
-                Cerrar
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1562,14 +1482,48 @@ export default function TabPBO({
               </div>
             </div>
 
+            {/* Sub-tabs for Activos vs Concluidos */}
+            <div className="flex border-b border-slate-200 mb-3 text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setSidebarTab('activos')}
+                className={`flex-1 py-2 text-center border-b-2 transition-all cursor-pointer ${
+                  sidebarTab === 'activos'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                PBO Activos ({lotes.filter(l => l.estatus_general === 'Abierto').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSidebarTab('concluidos')}
+                className={`flex-1 py-2 text-center border-b-2 transition-all cursor-pointer ${
+                  sidebarTab === 'concluidos'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                Concluidos ({lotes.filter(l => l.estatus_general === 'Cerrado').length})
+              </button>
+            </div>
+
             {/* List */}
             <div className="space-y-2.5 max-h-[480px] overflow-y-auto pr-1">
-              {sortedFilteredLotes.length === 0 ? (
-                <div className="text-center py-10 text-slate-400 text-xs font-semibold">
-                  Ningún expediente de PBO coincide con los filtros.
-                </div>
-              ) : (
-                sortedFilteredLotes.map(l => {
+              {(() => {
+                const filteredByTab = sortedFilteredLotes.filter(l => 
+                  sidebarTab === 'activos' ? l.estatus_general === 'Abierto' : l.estatus_general === 'Cerrado'
+                );
+
+                if (filteredByTab.length === 0) {
+                  return (
+                    <div className="text-center py-10 text-slate-400 text-xs font-semibold">
+                      Ningún expediente {sidebarTab === 'activos' ? 'activo' : 'concluido'} coincide con los criterios.
+                    </div>
+                  );
+                }
+
+                return filteredByTab.map(l => {
                   const isSelected = selectedLoteId === l.id_pbo;
                   return (
                     <div
@@ -1608,8 +1562,8 @@ export default function TabPBO({
                       </div>
                     </div>
                   );
-                })
-              )}
+                });
+              })()}
             </div>
 
             {/* Test Seeder Button */}
@@ -1677,15 +1631,27 @@ export default function TabPBO({
                         <Printer className="w-3.5 h-3.5" /> Descargar PNG
                       </button>
 
-                      <button
-                        onClick={() => setDeleteConfirmId(activeLote.id_pbo)}
-                        className="flex items-center gap-1 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 text-xs font-bold px-3 py-2 rounded-xl border border-red-200 transition-all cursor-pointer shadow-xs"
-                        title="Eliminar Expediente"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> Eliminar PBO
-                      </button>
+                      {activeLote.estatus_general !== 'Cerrado' && (
+                        <button
+                          onClick={() => setDeleteConfirmId(activeLote.id_pbo)}
+                          className="flex items-center gap-1 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 text-xs font-bold px-3 py-2 rounded-xl border border-red-200 transition-all cursor-pointer shadow-xs"
+                          title="Eliminar Expediente"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Eliminar PBO
+                        </button>
+                      )}
                     </div>
                   </div>
+
+                  {activeLote.estatus_general === 'Cerrado' && (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3.5 text-xs font-bold flex items-center gap-2.5 shadow-xs">
+                      <Eye className="w-5 h-5 text-amber-600 shrink-0" />
+                      <div>
+                        <span className="block text-slate-800 uppercase tracking-wider font-extrabold text-[10px]">Expediente Culminado (Cerrado)</span>
+                        <p className="font-medium text-[11px] text-amber-700 mt-0.5">Este PBO ha concluido todo su proceso técnico y físico. El sistema lo ha bloqueado en modo de <strong className="font-black text-amber-900">SOLO VISUALIZACIÓN</strong> para resguardar la trazabilidad.</p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* INTERNAL DETAIL NAV TABS */}
                   <div className="flex border-b border-slate-200 overflow-x-auto">
@@ -1720,14 +1686,6 @@ export default function TabPBO({
                       }`}
                     >
                       🧪 Causa y Medidas
-                    </button>
-                    <button
-                      onClick={() => setPboTabActive('traslado')}
-                      className={`py-2 px-3.5 font-bold text-xs transition-all whitespace-nowrap border-b-2 cursor-pointer ${
-                        pboTabActive === 'traslado' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-400 hover:text-slate-700'
-                      }`}
-                    >
-                      📦 Logística y Almacén
                     </button>
                   </div>
 
@@ -1820,7 +1778,7 @@ export default function TabPBO({
                                         setPaletas(updated);
                                       }
                                     }}
-                                    disabled={currentRole !== 'calidad'}
+                                    disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
                                     className="bg-slate-50 border border-slate-200 text-xs p-1 rounded-md font-mono w-28 disabled:opacity-75"
                                   />
                                 </td>
@@ -1836,7 +1794,7 @@ export default function TabPBO({
                                         setPaletas(updated);
                                       }
                                     }}
-                                    disabled={currentRole !== 'calidad'}
+                                    disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
                                     className="bg-slate-50 border border-slate-200 text-xs p-1 rounded-md w-16 disabled:opacity-75"
                                   />
                                 </td>
@@ -1852,7 +1810,7 @@ export default function TabPBO({
                                         setPaletas(updated);
                                       }
                                     }}
-                                    disabled={currentRole !== 'calidad'}
+                                    disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
                                     className="bg-slate-50 border border-slate-200 text-xs p-1 rounded-md w-16 disabled:opacity-75"
                                   />
                                 </td>
@@ -1868,7 +1826,7 @@ export default function TabPBO({
                                         setPaletas(updated);
                                       }
                                     }}
-                                    disabled={currentRole !== 'calidad'}
+                                    disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
                                     className="bg-slate-50 border border-slate-200 text-xs p-1 rounded-md w-full min-w-[120px] disabled:opacity-75"
                                   />
                                 </td>
@@ -1876,7 +1834,7 @@ export default function TabPBO({
                                   <select
                                     value={p.estatus}
                                     onChange={(e) => handlePaletaStatusChange(p, e.target.value)}
-                                    disabled={currentRole !== 'calidad'}
+                                    disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
                                     className="bg-slate-50 border border-slate-200 text-xs p-1 rounded-md disabled:opacity-75 font-semibold text-slate-700"
                                   >
                                     <option value="Sin reprocesar">🔴 Sin reprocesar</option>
@@ -1891,7 +1849,7 @@ export default function TabPBO({
                         </table>
                       </div>
                       
-                      {currentRole === 'calidad' && (
+                      {currentRole === 'calidad' && activeLote.estatus_general !== 'Cerrado' && (
                         <div className="flex justify-end">
                           <button
                             type="submit"
@@ -1973,72 +1931,78 @@ export default function TabPBO({
                       </div>
 
                       {/* Add Reprocess Form */}
-                      {currentRole === 'calidad' && (
+                      {currentRole === 'calidad' && activeLote.estatus_general !== 'Cerrado' && (
                         <form onSubmit={handleAddReproceso} className="bg-orange-50/15 border border-orange-100 p-5 rounded-2xl space-y-4">
                           <h4 className="text-xs font-extrabold text-orange-700 uppercase tracking-widest flex items-center gap-1.5 border-b border-orange-100 pb-2">
-                            <RefreshCw className="w-4 h-4 animate-spin-slow" /> Registrar Nuevo Reproceso de Tickets
+                            <RefreshCw className="w-4 h-4" /> Registrar Nuevo Reproceso de Unidad
                           </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div>
                               <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
-                                Tickets consumidos (Seleccione arriba o escriba separados por coma)
+                                Tipo de Unidad
+                              </label>
+                              <div className="flex bg-white rounded-lg p-0.5 border border-slate-200">
+                                <button
+                                  type="button"
+                                  onClick={() => setReproForm(prev => ({ ...prev, camadas_sueltas: 0 }))}
+                                  className={`flex-1 py-1 text-center font-bold text-[10px] rounded-md transition-all ${
+                                    reproForm.camadas_sueltas === 0
+                                      ? 'bg-orange-600 text-white shadow-xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  Paleta Completa
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setReproForm(prev => ({ ...prev, camadas_sueltas: 1 }))}
+                                  className={`flex-1 py-1 text-center font-bold text-[10px] rounded-md transition-all ${
+                                    reproForm.camadas_sueltas > 0
+                                      ? 'bg-orange-600 text-white shadow-xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  Camadas Sueltas
+                                </button>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                                Número de Ticket Correspondiente
                               </label>
                               <input
                                 type="text"
-                                placeholder="Ej: TKT-20260707-01, TKT-20260707-02"
-                                value={reproForm.tickets_originales_consumidos}
-                                onChange={(e) => {
-                                  const textVal = e.target.value;
-                                  setReproForm(prev => ({ ...prev, tickets_originales_consumidos: textVal }));
-                                  const parsed = textVal.split(',').map(s => s.trim()).filter(Boolean);
-                                  setSelectedOriginalTickets(parsed);
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2.5 font-mono focus:outline-hidden text-slate-800"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
-                                Paletas completas generadas
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                value={reproForm.paletas_nuevas}
-                                onChange={(e) => setReproForm(prev => ({ ...prev, paletas_nuevas: parseInt(e.target.value) || 0 }))}
-                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2.5 focus:outline-hidden text-slate-800"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
-                                Nuevo Ticket Generado post-reproceso
-                              </label>
-                              <input
-                                type="text"
-                                placeholder="Requerido si hay paletas completas"
+                                placeholder="Ej: TKT-1234"
                                 value={reproForm.nuevo_ticket_reprocesado}
                                 onChange={(e) => setReproForm(prev => ({ ...prev, nuevo_ticket_reprocesado: e.target.value }))}
-                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2.5 font-mono focus:outline-hidden text-slate-800"
+                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-mono font-bold"
                               />
                             </div>
-                            <div>
-                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
-                                Camadas sueltas (0 si es paleta completa)
-                              </label>
-                              <input
-                                type="number"
-                                value={reproForm.camadas_sueltas}
-                                onChange={(e) => setReproForm(prev => ({ ...prev, camadas_sueltas: parseInt(e.target.value) || 0 }))}
-                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2.5 focus:outline-hidden text-slate-800"
-                              />
-                            </div>
+
+                            {reproForm.camadas_sueltas > 0 && (
+                              <div>
+                                <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                                  Cantidad de Camadas
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="20"
+                                  value={reproForm.camadas_sueltas}
+                                  onChange={(e) => setReproForm(prev => ({ ...prev, camadas_sueltas: Math.max(1, parseInt(e.target.value) || 1) }))}
+                                  className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800"
+                                />
+                              </div>
+                            )}
                           </div>
                           
                           <div className="flex justify-end pt-2">
                             <button
                               type="submit"
-                              className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shadow-xs"
+                              className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
                             >
-                              Guardar Ticket Reprocesado
+                              Registrar Reproceso
                             </button>
                           </div>
                         </form>
@@ -2110,7 +2074,7 @@ export default function TabPBO({
                           <textarea
                             value={causesState.causas}
                             onChange={(e) => setCausesState(prev => ({ ...prev, causas: e.target.value }))}
-                            disabled={currentRole !== 'calidad'}
+                            disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
                             placeholder="Describa la investigación técnica de por qué se generó la desviación de calidad..."
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg text-xs p-3 h-24 focus:outline-hidden disabled:opacity-75 focus:ring-1 focus:ring-orange-500 font-semibold"
                           />
@@ -2120,14 +2084,14 @@ export default function TabPBO({
                           <textarea
                             value={causesState.medidas_correctivas}
                             onChange={(e) => setCausesState(prev => ({ ...prev, medidas_correctivas: e.target.value }))}
-                            disabled={currentRole !== 'calidad'}
+                            disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
                             placeholder="Describa los ajustes en maquinaria o metodologías que se adoptaron para solucionar el evento..."
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg text-xs p-3 h-24 focus:outline-hidden disabled:opacity-75 focus:ring-1 focus:ring-orange-500 font-semibold"
                           />
                         </div>
                       </div>
 
-                      {currentRole === 'calidad' && (
+                      {currentRole === 'calidad' && activeLote.estatus_general !== 'Cerrado' && (
                         <div className="flex justify-end pt-2">
                           <button
                             type="submit"
@@ -2152,8 +2116,11 @@ export default function TabPBO({
                         </p>
                         <div className="flex flex-wrap gap-2">
                           <button
-                            onClick={() => handleMoveUbicacion('Almacen de PBO')}
-                            className={`flex-1 py-2 px-3 font-bold text-xs rounded-xl border transition-all cursor-pointer ${
+                            onClick={() => activeLote.estatus_general !== 'Cerrado' && handleMoveUbicacion('Almacen de PBO')}
+                            disabled={activeLote.estatus_general === 'Cerrado'}
+                            className={`flex-1 py-2 px-3 font-bold text-xs rounded-xl border transition-all disabled:opacity-50 ${
+                              activeLote.estatus_general === 'Cerrado' ? 'cursor-not-allowed' : 'cursor-pointer'
+                            } ${
                               activeLote.ubicacion === 'Almacen de PBO'
                                 ? 'bg-orange-600 text-white border-orange-600'
                                 : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -2162,8 +2129,11 @@ export default function TabPBO({
                             🚚 Almacén PBO (Retención)
                           </button>
                           <button
-                            onClick={() => handleMoveUbicacion('Transicion')}
-                            className={`flex-1 py-2 px-3 font-bold text-xs rounded-xl border transition-all cursor-pointer ${
+                            onClick={() => activeLote.estatus_general !== 'Cerrado' && handleMoveUbicacion('Transicion')}
+                            disabled={activeLote.estatus_general === 'Cerrado'}
+                            className={`flex-1 py-2 px-3 font-bold text-xs rounded-xl border transition-all disabled:opacity-50 ${
+                              activeLote.estatus_general === 'Cerrado' ? 'cursor-not-allowed' : 'cursor-pointer'
+                            } ${
                               activeLote.ubicacion === 'Transicion'
                                 ? 'bg-orange-600 text-white border-orange-600'
                                 : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -2172,8 +2142,11 @@ export default function TabPBO({
                             🔄 En Transición (Rework)
                           </button>
                           <button
-                            onClick={() => handleMoveUbicacion('Almacen de PT')}
-                            className={`flex-1 py-2 px-3 font-bold text-xs rounded-xl border transition-all cursor-pointer ${
+                            onClick={() => activeLote.estatus_general !== 'Cerrado' && handleMoveUbicacion('Almacen de PT')}
+                            disabled={activeLote.estatus_general === 'Cerrado'}
+                            className={`flex-1 py-2 px-3 font-bold text-xs rounded-xl border transition-all disabled:opacity-50 ${
+                              activeLote.estatus_general === 'Cerrado' ? 'cursor-not-allowed' : 'cursor-pointer'
+                            } ${
                               activeLote.ubicacion === 'Almacen de PT'
                                 ? 'bg-orange-600 text-white border-orange-600'
                                 : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -2217,7 +2190,7 @@ export default function TabPBO({
                                     {r.estatus_logistica}
                                   </span>
 
-                                  {currentRole !== 'public' && (
+                                  {currentRole !== 'public' && activeLote.estatus_general !== 'Cerrado' && (
                                     <>
                                       <button
                                         onClick={() => handleLogisticsValidateTicket(r.id, 'Confirmado')}
