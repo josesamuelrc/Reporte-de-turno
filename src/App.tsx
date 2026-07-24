@@ -641,6 +641,7 @@ export default function App() {
               onLogout={handleLogout}
               cabeceraFecha={cabecera.fecha}
               cabeceraTurno={cabecera.turno}
+              cabeceraAnalista={cabecera.analista}
             />
           ) : (
             /* TRADITIONAL INSPECTION TABS */

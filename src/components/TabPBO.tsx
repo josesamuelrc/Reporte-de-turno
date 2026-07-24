@@ -279,6 +279,7 @@ interface TabPBOProps {
   onLogout: () => void;
   cabeceraFecha?: string;
   cabeceraTurno?: number;
+  cabeceraAnalista?: string;
 }
 
 export default function TabPBO({ 
@@ -286,7 +287,8 @@ export default function TabPBO({
   onAuthenticate, 
   onLogout,
   cabeceraFecha = '',
-  cabeceraTurno = 1
+  cabeceraTurno = 1,
+  cabeceraAnalista = ''
 }: TabPBOProps) {
   // DB State
   const [lotes, setLotes] = useState<LotePBO[]>([]);
@@ -309,7 +311,16 @@ export default function TabPBO({
   const [generatedTicketInputs, setGeneratedTicketInputs] = useState<string[]>([]);
 
   // Username registry identification
-  const [usuarioRegistro, setUsuarioRegistro] = useState<string>(() => localStorage.getItem('usuario_registro_pbo') || 'OPERADOR');
+  const [usuarioRegistro, setUsuarioRegistro] = useState<string>(() => {
+    return cabeceraAnalista || localStorage.getItem('usuario_registro_pbo') || 'OPERADOR';
+  });
+
+  // Sync analyst name when cabeceraAnalista changes
+  useEffect(() => {
+    if (cabeceraAnalista) {
+      setUsuarioRegistro(cabeceraAnalista);
+    }
+  }, [cabeceraAnalista]);
   const [modalPaletas, setModalPaletas] = useState<{
     index: number;
     nro_ticket: string;
@@ -364,9 +375,12 @@ export default function TabPBO({
   const [reproForm, setReproForm] = useState({
     tickets_originales_consumidos: '',
     nuevo_ticket_reprocesado: '',
-    paletas_nuevas: 0,
+    paletas_nuevas: 1,
     camadas_sueltas: 0,
+    cantidad_unidades: 1,
   });
+
+  const [editingRepro, setEditingRepro] = useState<Reproceso | null>(null);
 
   // Lab Dictamen Selection
   const [selectedReproId, setSelectedReproId] = useState<string | null>(null);
@@ -721,73 +735,138 @@ export default function TabPBO({
     if (!selectedLoteId) return;
 
     if (!reproForm.nuevo_ticket_reprocesado) {
-      alert("Debe indicar el número de ticket correspondente.");
+      alert("Debe indicar al menos un número de ticket.");
       return;
     }
 
-    const inputTicket = reproForm.nuevo_ticket_reprocesado.trim().toUpperCase();
+    const inputTickets = reproForm.nuevo_ticket_reprocesado
+      .split(/[\s,;\n]+/)
+      .map(t => t.trim().toUpperCase())
+      .filter(t => t.length > 0);
 
-    const reproId = `REP-${Date.now()}`;
-    const nuevoRep: Reproceso = {
-      id: reproId,
-      id_pbo: selectedLoteId,
-      tickets_originales_consumidos: inputTicket,
-      nuevo_ticket_reprocesado: inputTicket,
-      camadas_sueltas: reproForm.camadas_sueltas || 0,
-      estatus_calidad: 'Aprobado',
-      estatus_logistica: 'Confirmado',
-      usuario_registro: usuarioRegistro || 'CALIDAD (REPROCESO)',
-      creado_el: new Date().toISOString(),
-      fecha_registro: cabeceraFecha,
-      turno_registro: cabeceraTurno
-    };
-
-    // Update the corresponding original paleta to "Reprocesado" state
-    const updatedPaletas = paletas.map(p => {
-      if (p.id_pbo === selectedLoteId && p.nro_ticket.toUpperCase() === inputTicket) {
-        return { ...p, estatus: 'Reprocesado' as const };
-      }
-      return p;
-    });
+    if (inputTickets.length === 0) {
+      alert("No se ingresaron números de ticket válidos.");
+      return;
+    }
 
     try {
-      await saveReprocesoPBO(nuevoRep);
-      
-      // Save updated original paletas
-      const loteConsumedPaletas = updatedPaletas.filter(p => p.id_pbo === selectedLoteId && p.nro_ticket.toUpperCase() === inputTicket);
-      if (loteConsumedPaletas.length > 0) {
-        await savePaletasPBO(loteConsumedPaletas);
-        setPaletas(updatedPaletas);
-      } else {
-        // Auto-create quarantine paleta if they entered a custom or new ticket
-        const newPaleta: Paleta = {
-          id: `${selectedLoteId}-P${paletas.filter(p => p.id_pbo === selectedLoteId).length + 1}`,
+      let updatedPaletas = [...paletas];
+      const paletasToSaveList: Paleta[] = [];
+
+      for (let i = 0; i < inputTickets.length; i++) {
+        const tkt = inputTickets[i];
+        const reproId = `REP-${Date.now()}-${i}`;
+        const nuevoRep: Reproceso = {
+          id: reproId,
           id_pbo: selectedLoteId,
-          nro_ticket: inputTicket,
+          tickets_originales_consumidos: tkt,
+          nuevo_ticket_reprocesado: tkt,
           camadas_sueltas: reproForm.camadas_sueltas || 0,
-          defecto: 'Reproceso registrado',
-          nca: '2.5',
-          estatus: 'Reprocesado' as const,
-          creado_el: new Date().toISOString()
+          paletas_nuevas: reproForm.paletas_nuevas || 0,
+          estatus_calidad: 'Aprobado',
+          estatus_logistica: 'Confirmado',
+          usuario_registro: usuarioRegistro || 'CALIDAD (REPROCESO)',
+          creado_el: new Date().toISOString(),
+          fecha_registro: cabeceraFecha,
+          turno_registro: cabeceraTurno
         };
-        await savePaletasPBO([newPaleta]);
-        setPaletas([...paletas, newPaleta]);
+        
+        await saveReprocesoPBO(nuevoRep);
+
+        // Update corresponding paleta to "Reprocesado"
+        const existingPaletaIdx = updatedPaletas.findIndex(p => p.id_pbo === selectedLoteId && p.nro_ticket.toUpperCase() === tkt);
+        if (existingPaletaIdx !== -1) {
+          updatedPaletas[existingPaletaIdx] = {
+            ...updatedPaletas[existingPaletaIdx],
+            estatus: 'Reprocesado' as const,
+            camadas_sueltas: reproForm.camadas_sueltas || 0,
+            paletas_nuevas: reproForm.paletas_nuevas || 0
+          };
+          paletasToSaveList.push(updatedPaletas[existingPaletaIdx]);
+        } else {
+          // Auto-create quarantine paleta if they entered a custom or new ticket
+          const newPaleta: Paleta = {
+            id: `${selectedLoteId}-P${updatedPaletas.filter(p => p.id_pbo === selectedLoteId).length + 1 + i}`,
+            id_pbo: selectedLoteId,
+            nro_ticket: tkt,
+            camadas_sueltas: reproForm.camadas_sueltas || 0,
+            paletas_nuevas: reproForm.paletas_nuevas || 0,
+            defecto: 'Reproceso registrado',
+            nca: '2.5',
+            estatus: 'Reprocesado' as const,
+            creado_el: new Date().toISOString()
+          };
+          updatedPaletas.push(newPaleta);
+          paletasToSaveList.push(newPaleta);
+        }
       }
-      
+
+      if (paletasToSaveList.length > 0) {
+        await savePaletasPBO(paletasToSaveList);
+        setPaletas(updatedPaletas);
+      }
+
       await checkAndAutoCloseLote(selectedLoteId);
 
       setReproForm({
         tickets_originales_consumidos: '',
         nuevo_ticket_reprocesado: '',
-        paletas_nuevas: 0,
+        paletas_nuevas: 1,
         camadas_sueltas: 0,
+        cantidad_unidades: 1
       });
       setSelectedOriginalTickets([]);
       setRefreshTrigger(p => p + 1);
-      alert(`¡Lote de reproceso registrado! El ticket ${inputTicket} ha sido marcado como 'Reprocesado'.`);
+      alert(`¡Se registraron ${inputTickets.length} paletas/camadas de reproceso con éxito!`);
     } catch (err) {
       console.error(err);
       alert("Error al registrar reproceso.");
+    }
+  };
+
+  const handleSaveEditedRepro = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRepro) return;
+    if (currentRole !== 'calidad') {
+      alert("Acceso denegado: Solo Calidad puede modificar reprocesos.");
+      return;
+    }
+    try {
+      await saveReprocesoPBO(editingRepro);
+      setEditingRepro(null);
+      setRefreshTrigger(p => p + 1);
+      alert("Reproceso actualizado con éxito.");
+    } catch (err) {
+      console.error(err);
+      alert("Error al guardar cambios del reproceso.");
+    }
+  };
+
+  const handleDeleteReproceso = async (repro: Reproceso) => {
+    if (currentRole !== 'calidad') {
+      alert("Acceso denegado: Solo Calidad puede eliminar reprocesos.");
+      return;
+    }
+    if (!window.confirm(`¿Está seguro de eliminar este reproceso para el ticket ${repro.nuevo_ticket_reprocesado}?`)) {
+      return;
+    }
+    try {
+      await deleteReprocesoPBO(repro.id);
+      
+      // Reset the corresponding original paleta status back to "Sin reprocesar"
+      const tkt = repro.nuevo_ticket_reprocesado.toUpperCase();
+      const paletaObj = paletas.find(p => p.id_pbo === repro.id_pbo && p.nro_ticket.toUpperCase() === tkt);
+      if (paletaObj) {
+        const updatedPaleta = { ...paletaObj, estatus: 'Sin reprocesar' as const };
+        await savePaletasPBO([updatedPaleta]);
+        setPaletas(prev => prev.map(p => p.id === paletaObj.id ? updatedPaleta : p));
+      }
+      
+      setRefreshTrigger(p => p + 1);
+      alert("Reproceso eliminado con éxito. La paleta ha sido devuelta al estatus 'Sin reprocesar'.");
+    } catch (err) {
+      console.error(err);
+      alert("Error al eliminar el reproceso.");
     }
   };
 
@@ -1054,7 +1133,11 @@ export default function TabPBO({
 
   // Percentage recovery rate: Total APPROVED cans in Rework plus directly liberated cans vs Total registered cans
   // We calculate total registered cans
-  const totalCansRegistered = lotes.reduce((acc, curr) => acc + curr.cantidad_total_latas, 0);
+  const totalCansRegistered = lotes.reduce((acc, curr) => {
+    const lotePalets = paletas.filter(p => p.id_pbo === curr.id_pbo);
+    const sumCans = lotePalets.reduce((sum, p) => sum + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(curr.formato)), 0);
+    return acc + sumCans;
+  }, 0);
   const totalLatasRetenidas = totalCansRegistered;
   
   // Liberated directly cans
@@ -1184,13 +1267,16 @@ export default function TabPBO({
     currentY += 30;
 
     // Details Grid Layout
+    const lotePaletsForDraw = paletas.filter(p => p.id_pbo === loteObj.id_pbo);
+    const totalCansOfLoteForDraw = lotePaletsForDraw.reduce((sum, p) => sum + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(loteObj.formato)), 0);
+
     const details = [
       { label: 'PRODUCTO:', val: loteObj.producto },
       { label: 'LOTE DE ENVASE:', val: loteObj.lote },
       { label: 'ORDEN FABRICACIÓN:', val: loteObj.orden },
       { label: 'PRESENTACIÓN:', val: loteObj.formato },
       { label: 'FECHA DE FABRICACIÓN:', val: loteObj.fecha_produccion },
-      { label: 'CANTIDAD (LATAS):', val: loteObj.cantidad_total_latas.toLocaleString() },
+      { label: 'CANTIDAD (LATAS):', val: totalCansOfLoteForDraw.toLocaleString() },
       { label: 'ALMACÉN ACTUAL:', val: loteObj.ubicacion.toUpperCase() },
       { label: 'REGISTRADO POR:', val: loteObj.usuario_registro }
     ];
@@ -1755,6 +1841,7 @@ export default function TabPBO({
                     const diferenciaReproceso = Math.max(0, materialReprocesado - materialSalidaReproceso);
                     const materialNoConforme = materialBriqueta + diferenciaReproceso;
                     const materialNoReprocesado = activeLotePaletas.filter(p => p.estatus === 'Sin reprocesar' || p.estatus === 'En proceso' || p.estatus === 'Aceptado Con desviacion' || p.estatus === 'Liberado Directo').reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
+                    const volumenTotalLatas = activeLotePaletas.reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
 
                     return (
                     <div className="space-y-4 text-xs">
@@ -1773,7 +1860,7 @@ export default function TabPBO({
                         </div>
                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
                           <span className="text-slate-400 block font-bold uppercase text-[9px] tracking-wider">Volumen total latas</span>
-                          <span className="font-bold text-slate-800 text-sm mt-0.5 block">{activeLote.cantidad_total_latas.toLocaleString()} latas</span>
+                          <span className="font-bold text-slate-800 text-sm mt-0.5 block">{volumenTotalLatas.toLocaleString()} latas</span>
                         </div>
                       </div>
                       
@@ -2026,65 +2113,59 @@ export default function TabPBO({
                           <h4 className="text-xs font-extrabold text-orange-700 uppercase tracking-widest flex items-center gap-1.5 border-b border-orange-100 pb-2">
                             <RefreshCw className="w-4 h-4" /> Registrar Nuevo Reproceso de Unidad
                           </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                               <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
-                                Tipo de Unidad
-                              </label>
-                              <div className="flex bg-white rounded-lg p-0.5 border border-slate-200">
-                                <button
-                                  type="button"
-                                  onClick={() => setReproForm(prev => ({ ...prev, camadas_sueltas: 0 }))}
-                                  className={`flex-1 py-1 text-center font-bold text-[10px] rounded-md transition-all ${
-                                    reproForm.camadas_sueltas === 0
-                                      ? 'bg-orange-600 text-white shadow-xs'
-                                      : 'text-slate-600 hover:text-slate-900'
-                                  }`}
-                                >
-                                  Paleta Completa
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setReproForm(prev => ({ ...prev, camadas_sueltas: 1 }))}
-                                  className={`flex-1 py-1 text-center font-bold text-[10px] rounded-md transition-all ${
-                                    reproForm.camadas_sueltas > 0
-                                      ? 'bg-orange-600 text-white shadow-xs'
-                                      : 'text-slate-600 hover:text-slate-900'
-                                  }`}
-                                >
-                                  Camadas Sueltas
-                                </button>
-                              </div>
-                            </div>
-
-                            <div>
-                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
-                                Número de Ticket Correspondiente
+                                Paletas Completas
                               </label>
                               <input
-                                type="text"
-                                placeholder="Ej: TKT-1234"
-                                value={reproForm.nuevo_ticket_reprocesado}
-                                onChange={(e) => setReproForm(prev => ({ ...prev, nuevo_ticket_reprocesado: e.target.value }))}
-                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-mono font-bold"
+                                type="number"
+                                min="0"
+                                value={reproForm.paletas_nuevas}
+                                onChange={(e) => {
+                                  const val = Math.max(0, parseInt(e.target.value) || 0);
+                                  setReproForm(prev => ({ ...prev, paletas_nuevas: val }));
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-bold"
                               />
                             </div>
 
-                            {reproForm.camadas_sueltas > 0 && (
-                              <div>
-                                <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
-                                  Cantidad de Camadas
-                                </label>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="20"
-                                  value={reproForm.camadas_sueltas}
-                                  onChange={(e) => setReproForm(prev => ({ ...prev, camadas_sueltas: Math.max(1, parseInt(e.target.value) || 1) }))}
-                                  className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800"
-                                />
-                              </div>
-                            )}
+                            <div>
+                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                                Camadas Sueltas
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={reproForm.camadas_sueltas}
+                                onChange={(e) => {
+                                  const val = Math.max(0, parseInt(e.target.value) || 0);
+                                  setReproForm(prev => ({ ...prev, camadas_sueltas: val }));
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-bold"
+                              />
+                            </div>
+
+                            <div className="sm:col-span-2">
+                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                                Tickets de las Unidades Reprocesadas (separe por espacios, comas o saltos de línea) - {reproForm.nuevo_ticket_reprocesado.split(/[\s,;\n]+/).filter(t => t.trim().length > 0).length} detectados
+                              </label>
+                              <textarea
+                                placeholder="Ej: TKT-1234, TKT-5678, TKT-9012"
+                                rows={2}
+                                value={reproForm.nuevo_ticket_reprocesado}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  const count = val.split(/[\s,;\n]+/).filter(t => t.trim().length > 0).length;
+                                  setReproForm(prev => ({ 
+                                    ...prev, 
+                                    nuevo_ticket_reprocesado: val,
+                                    cantidad_unidades: count > 0 ? count : prev.cantidad_unidades 
+                                  }));
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-mono font-bold"
+                              />
+                            </div>
                           </div>
                           
                           <div className="flex justify-end pt-2">
@@ -2092,7 +2173,7 @@ export default function TabPBO({
                               type="submit"
                               className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
                             >
-                              Registrar Reproceso
+                              Registrar Reproceso ({reproForm.nuevo_ticket_reprocesado.split(/[\s,;\n]+/).filter(t => t.trim().length > 0).length || 1} items)
                             </button>
                           </div>
                         </form>
@@ -2111,42 +2192,146 @@ export default function TabPBO({
                               <thead>
                                 <tr className="bg-slate-50 text-slate-600 font-bold uppercase border-b border-slate-200">
                                   <th className="py-2.5 px-3">Tickets Generados</th>
-                                  <th className="py-2.5 px-3 text-center">Camadas Generadas</th>
+                                  <th className="py-2.5 px-3 text-center">Paletas</th>
+                                  <th className="py-2.5 px-3 text-center">Camadas</th>
                                   <th className="py-2.5 px-3">Tickets Originales Consumidos</th>
                                   <th className="py-2.5 px-3">Status Calidad</th>
                                   <th className="py-2.5 px-3">Status Logística</th>
+                                  <th className="py-2.5 px-3 text-right">Acciones</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100 text-slate-700">
-                                {activeLoteRepros.map(r => (
-                                  <tr key={r.id} className="hover:bg-slate-50/50">
-                                    <td className="py-2 px-3 font-mono font-bold text-indigo-700">{r.nuevo_ticket_reprocesado}</td>
-                                    <td className="py-2 px-3 text-center font-semibold">{r.camadas_sueltas || '0'}</td>
-                                    <td className="py-2 px-3 font-mono text-slate-500">{r.tickets_originales_consumidos}</td>
-                                    <td className="py-2 px-3">
-                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                        r.estatus_calidad === 'Aprobado' || r.estatus_calidad === 'Chequeado por Calidad'
-                                          ? 'bg-emerald-100 text-emerald-800' 
-                                          : r.estatus_calidad === 'Rechazado' 
-                                            ? 'bg-red-100 text-red-800' 
-                                            : 'bg-amber-100 text-amber-800'
-                                      }`}>
-                                        {r.estatus_calidad}
-                                      </span>
-                                    </td>
-                                    <td className="py-2 px-3">
-                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                        r.estatus_logistica === 'Confirmado' 
-                                          ? 'bg-emerald-100 text-emerald-800' 
-                                          : r.estatus_logistica === 'Inconsistencia' 
-                                            ? 'bg-red-100 text-red-800' 
-                                            : 'bg-slate-200 text-slate-700'
-                                      }`}>
-                                        {r.estatus_logistica}
-                                      </span>
-                                    </td>
-                                  </tr>
-                                ))}
+                                {activeLoteRepros.map(r => {
+                                  const isEditing = editingRepro?.id === r.id;
+                                  if (isEditing && editingRepro) {
+                                    return (
+                                      <tr key={r.id} className="bg-orange-50/20">
+                                        <td className="py-2 px-3">
+                                          <input
+                                            type="text"
+                                            value={editingRepro.nuevo_ticket_reprocesado}
+                                            onChange={(e) => setEditingRepro({ ...editingRepro, nuevo_ticket_reprocesado: e.target.value.toUpperCase() })}
+                                            className="w-full bg-white border border-slate-200 rounded p-1 font-mono text-xs font-bold"
+                                          />
+                                        </td>
+                                        <td className="py-2 px-3 text-center">
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            value={editingRepro.paletas_nuevas ?? 0}
+                                            onChange={(e) => setEditingRepro({ ...editingRepro, paletas_nuevas: parseInt(e.target.value) || 0 })}
+                                            className="w-16 bg-white border border-slate-200 rounded p-1 text-center text-xs font-semibold"
+                                          />
+                                        </td>
+                                        <td className="py-2 px-3 text-center">
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            value={editingRepro.camadas_sueltas}
+                                            onChange={(e) => setEditingRepro({ ...editingRepro, camadas_sueltas: parseInt(e.target.value) || 0 })}
+                                            className="w-16 bg-white border border-slate-200 rounded p-1 text-center text-xs font-semibold"
+                                          />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                          <input
+                                            type="text"
+                                            value={editingRepro.tickets_originales_consumidos}
+                                            onChange={(e) => setEditingRepro({ ...editingRepro, tickets_originales_consumidos: e.target.value.toUpperCase() })}
+                                            className="w-full bg-white border border-slate-200 rounded p-1 font-mono text-xs"
+                                          />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                          <select
+                                            value={editingRepro.estatus_calidad}
+                                            onChange={(e) => setEditingRepro({ ...editingRepro, estatus_calidad: e.target.value as any })}
+                                            className="bg-white border border-slate-200 rounded p-1 text-xs font-bold"
+                                          >
+                                            <option value="Aprobado">Aprobado</option>
+                                            <option value="Rechazado">Rechazado</option>
+                                            <option value="Chequeado por Calidad">Chequeado por Calidad</option>
+                                            <option value="En Control de Calidad">En Control de Calidad</option>
+                                          </select>
+                                        </td>
+                                        <td className="py-2 px-3">
+                                          <select
+                                            value={editingRepro.estatus_logistica}
+                                            onChange={(e) => setEditingRepro({ ...editingRepro, estatus_logistica: e.target.value as any })}
+                                            className="bg-white border border-slate-200 rounded p-1 text-xs font-bold"
+                                          >
+                                            <option value="Confirmado">Confirmado</option>
+                                            <option value="Inconsistencia">Inconsistencia</option>
+                                            <option value="En espera">En espera</option>
+                                          </select>
+                                        </td>
+                                        <td className="py-2 px-3 text-right">
+                                          <div className="flex justify-end gap-1.5">
+                                            <button
+                                              onClick={handleSaveEditedRepro}
+                                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg transition-all cursor-pointer"
+                                            >
+                                              Guardar
+                                            </button>
+                                            <button
+                                              onClick={() => setEditingRepro(null)}
+                                              className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-[10px] px-2.5 py-1.5 rounded-lg transition-all cursor-pointer"
+                                            >
+                                              Cancelar
+                                            </button>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  }
+
+                                  return (
+                                    <tr key={r.id} className="hover:bg-slate-50/50">
+                                      <td className="py-2 px-3 font-mono font-bold text-indigo-700">{r.nuevo_ticket_reprocesado}</td>
+                                      <td className="py-2 px-3 text-center font-semibold">{r.paletas_nuevas ?? 0}</td>
+                                      <td className="py-2 px-3 text-center font-semibold">{r.camadas_sueltas || '0'}</td>
+                                      <td className="py-2 px-3 font-mono text-slate-500">{r.tickets_originales_consumidos}</td>
+                                      <td className="py-2 px-3">
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                          r.estatus_calidad === 'Aprobado' || r.estatus_calidad === 'Chequeado por Calidad'
+                                            ? 'bg-emerald-100 text-emerald-800' 
+                                            : r.estatus_calidad === 'Rechazado' 
+                                              ? 'bg-red-100 text-red-800' 
+                                              : 'bg-amber-100 text-amber-800'
+                                        }`}>
+                                          {r.estatus_calidad}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                          r.estatus_logistica === 'Confirmado' 
+                                            ? 'bg-emerald-100 text-emerald-800' 
+                                            : r.estatus_logistica === 'Inconsistencia' 
+                                              ? 'bg-red-100 text-red-800' 
+                                              : 'bg-slate-200 text-slate-700'
+                                        }`}>
+                                          {r.estatus_logistica}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-right">
+                                        {currentRole === 'calidad' && (
+                                          <div className="flex justify-end gap-1.5">
+                                            <button
+                                              onClick={() => setEditingRepro({ ...r })}
+                                              className="text-indigo-600 hover:text-indigo-850 font-bold text-[10px] bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded transition-all cursor-pointer"
+                                            >
+                                              Editar
+                                            </button>
+                                            <button
+                                              onClick={() => handleDeleteReproceso(r)}
+                                              className="text-red-600 hover:text-red-850 font-bold text-[10px] bg-red-50 hover:bg-red-100 px-2 py-1 rounded transition-all cursor-pointer"
+                                            >
+                                              Eliminar
+                                            </button>
+                                          </div>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
