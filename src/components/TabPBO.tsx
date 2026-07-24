@@ -24,8 +24,15 @@ import {
   RefreshCw,
   Printer,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  FileText,
+  Download,
+  X,
+  Copy,
+  FileSpreadsheet
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import { LotePBO, Paleta, Reproceso } from '../types';
 import { getLotesPBO, saveLotePBO, deleteLotePBO, getPaletasPBO, savePaletasPBO, getReprocesosPBO, saveReprocesoPBO, deleteReprocesoPBO, deletePaletaPBO } from '../db';
 
@@ -340,6 +347,10 @@ export default function TabPBO({
   
   // PBO Modals & Forms
   const [showNewLoteModal, setShowNewLoteModal] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [summaryFilterScope, setSummaryFilterScope] = useState<'activos' | 'todos'>('activos');
+  const [summarySearch, setSummarySearch] = useState('');
+  const [copiedSummaryToast, setCopiedSummaryToast] = useState(false);
   const [pboTabActive, setPboTabActive] = useState<'info' | 'paletas' | 'reproceso' | 'causas' | 'traslado'>('info');
 
   // Security Login state inside PBO if not authenticated
@@ -1193,6 +1204,359 @@ export default function TabPBO({
     }
   };
 
+  // Generate PDF Summary (Matching exact table format: MATERIAL, DESCRIPCION, Lote, #Ticket, Cantidad total de paletas, CAMADAS, Defecto, NCA)
+  const findMaterialInfo = (productoStr: string) => {
+    if (!productoStr) return { codigo: 'Y00336', descripcion: 'PILSEN SLEEK 12 OZ' };
+    const norm = productoStr.toUpperCase().trim();
+    const found = CATALOGO_PRODUCTOS_PBO.find(c => {
+      const cNorm = c.nombre.toUpperCase().trim();
+      return cNorm === norm || norm.includes(cNorm) || cNorm.includes(norm);
+    });
+    if (found) {
+      return { codigo: found.codigo, descripcion: found.nombre };
+    }
+    if (norm.includes('PILSEN SLEEK') || norm.includes('PILSEN')) return { codigo: 'Y00336', descripcion: 'PILSEN SLEEK 12 OZ' };
+    if (norm.includes('SOLERA LIGHT') || norm.includes('SOLERA')) return { codigo: 'Y00108', descripcion: 'CUERPO LATA SOLERA LIGHT 250ML/8.4OZ' };
+    if (norm.includes('SPARKLING') || norm.includes('SODA')) return { codigo: 'Y00369', descripcion: 'CUERPO LATA SODA SPARKLING SLEEK 355ML/1' };
+    if (norm.includes('MANZANA') || norm.includes('YUKERY')) return { codigo: 'Y00360', descripcion: 'CUERPO LATA MANZANA YUKERY SLEEK 335ML/12OZ' };
+    if (norm.includes('PEPSI')) return { codigo: 'Y00346', descripcion: 'CUERPO LATA PEPSI SLEEK 355ML/12OZ' };
+    return { codigo: 'Y00336', descripcion: productoStr.toUpperCase() };
+  };
+
+  const cleanTicketStr = (ticketRaw: string) => {
+    if (!ticketRaw) return 'N/A';
+    const parts = ticketRaw.trim().split('-');
+    const lastPart = parts[parts.length - 1].trim();
+    if (!isNaN(Number(lastPart)) && lastPart.length > 0) {
+      return String(Number(lastPart));
+    }
+    return lastPart || ticketRaw;
+  };
+
+  // Build summary data for PBO
+  interface SummaryRow {
+    material: string;
+    descripcion: string;
+    lote: string;
+    tickets: string;
+    cantidadPaletas: number;
+    camadas: number;
+    defecto: string;
+    nca: string;
+    id_pbo: string;
+  }
+
+  const buildSummaryRows = (targetLoteId?: string | null, scope?: 'activos' | 'todos'): SummaryRow[] => {
+    let targetLotes: LotePBO[] = [];
+
+    if (targetLoteId) {
+      targetLotes = lotes.filter(l => l.id_pbo === targetLoteId);
+    } else {
+      const activeScope = scope || summaryFilterScope;
+      if (activeScope === 'activos') {
+        targetLotes = lotes.filter(l => l.estatus_general === 'Abierto' || l.estatus_general !== 'Cerrado');
+        if (targetLotes.length === 0) targetLotes = lotes;
+      } else {
+        targetLotes = lotes;
+      }
+    }
+
+    const rows: SummaryRow[] = [];
+
+    targetLotes.forEach(loteObj => {
+      const lotePalets = paletas.filter(p => p.id_pbo === loteObj.id_pbo);
+      const matInfo = findMaterialInfo(loteObj.producto);
+
+      if (lotePalets.length === 0) {
+        rows.push({
+          material: matInfo.codigo,
+          descripcion: matInfo.descripcion,
+          lote: loteObj.lote,
+          tickets: 'N/A',
+          cantidadPaletas: 0,
+          camadas: 0,
+          defecto: (loteObj.defecto_general || 'N/D').toUpperCase(),
+          nca: 'N/A',
+          id_pbo: loteObj.id_pbo,
+        });
+      } else {
+        const groups: Record<string, { tickets: string[]; count: number; camadas: number; defecto: string; nca: string }> = {};
+
+        lotePalets.forEach(p => {
+          const ticketClean = cleanTicketStr(p.nro_ticket);
+          const defectoClean = p.defecto ? p.defecto.trim() : (loteObj.defecto_general || 'SIN DEFECTO');
+          const ncaVal = p.nca ? String(p.nca).trim() : '0';
+          const ncaFormatted = ncaVal.endsWith('%') ? ncaVal : `${ncaVal}%`;
+          const camadasVal = p.camadas_sueltas || 0;
+
+          const key = `${defectoClean.toLowerCase()}_${ncaFormatted}_${camadasVal}`;
+
+          if (!groups[key]) {
+            groups[key] = {
+              tickets: [],
+              count: 0,
+              camadas: camadasVal,
+              defecto: defectoClean,
+              nca: ncaFormatted,
+            };
+          }
+          if (!groups[key].tickets.includes(ticketClean)) {
+            groups[key].tickets.push(ticketClean);
+          }
+          groups[key].count += 1;
+        });
+
+        Object.values(groups).forEach(g => {
+          g.tickets.sort((a, b) => {
+            const numA = Number(a);
+            const numB = Number(b);
+            if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+            return a.localeCompare(b);
+          });
+
+          rows.push({
+            material: matInfo.codigo,
+            descripcion: matInfo.descripcion,
+            lote: loteObj.lote,
+            tickets: g.tickets.join(','),
+            cantidadPaletas: g.count,
+            camadas: g.camadas,
+            defecto: g.defecto.toUpperCase(),
+            nca: g.nca,
+            id_pbo: loteObj.id_pbo,
+          });
+        });
+      }
+    });
+
+    return rows;
+  };
+
+  const allSummaryRows = buildSummaryRows(null, summaryFilterScope);
+  const filteredSummaryRows = allSummaryRows.filter(r => {
+    if (!summarySearch) return true;
+    const term = summarySearch.toLowerCase().trim();
+    return (
+      r.material.toLowerCase().includes(term) ||
+      r.descripcion.toLowerCase().includes(term) ||
+      r.lote.toLowerCase().includes(term) ||
+      r.defecto.toLowerCase().includes(term) ||
+      r.tickets.toLowerCase().includes(term) ||
+      r.id_pbo.toLowerCase().includes(term)
+    );
+  });
+
+  const copySummaryToClipboard = () => {
+    const headers = ["MATERIAL", "DESCRIPCION", "Lote", "#Ticket", "Cantidad total de paletas", "CAMADAS", "Defecto", "NCA"];
+    const tsvRows = filteredSummaryRows.map(r => 
+      [r.material, r.descripcion, r.lote, r.tickets, r.cantidadPaletas, r.camadas, r.defecto, r.nca].join("\t")
+    );
+    const content = [headers.join("\t"), ...tsvRows].join("\n");
+    navigator.clipboard.writeText(content);
+    setCopiedSummaryToast(true);
+    setTimeout(() => setCopiedSummaryToast(false), 2500);
+  };
+
+  const generateSummaryPDF = async (targetLoteId?: string | null) => {
+    const rows = targetLoteId ? buildSummaryRows(targetLoteId) : filteredSummaryRows;
+
+    if (rows.length === 0) {
+      alert('No hay expedientes PBO para generar el resumen.');
+      return;
+    }
+
+    const totalPaletas = rows.reduce((a, b) => a + b.cantidadPaletas, 0);
+    const totalCamadas = rows.reduce((a, b) => a + b.camadas, 0);
+    const totalMateriales = new Set(rows.map(r => r.material)).size;
+
+    // Chunk rows into pages to prevent table rows from getting sliced in half on page breaks
+    const rowsPerPage1 = 8;
+    const rowsPerPageOther = 11;
+
+    const pageChunks: SummaryRow[][] = [];
+    if (rows.length <= rowsPerPage1) {
+      pageChunks.push(rows);
+    } else {
+      pageChunks.push(rows.slice(0, rowsPerPage1));
+      let offset = rowsPerPage1;
+      while (offset < rows.length) {
+        pageChunks.push(rows.slice(offset, offset + rowsPerPageOther));
+        offset += rowsPerPageOther;
+      }
+    }
+
+    const totalPages = pageChunks.length;
+
+    try {
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+        const chunk = pageChunks[pageIdx];
+        const isFirstPage = pageIdx === 0;
+
+        const container = document.createElement('div');
+        container.style.position = 'fixed';
+        container.style.left = '-9999px';
+        container.style.top = '-9999px';
+        container.style.width = '1200px';
+        container.style.backgroundColor = '#ffffff';
+        container.style.padding = '24px';
+        container.style.fontFamily = 'Arial, Helvetica, sans-serif';
+
+        let innerHTML = '';
+
+        if (isFirstPage) {
+          innerHTML += `
+            <div style="background-color: #0f172a; color: #ffffff; padding: 20px 24px; border-radius: 12px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; border: 1px solid #1e293b;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                  <h1 style="margin: 0; font-size: 22px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; color: #ffffff;">
+                    RESUMEN PBO - CONTROL DE CALIDAD Y DEFECTOS
+                  </h1>
+                  <span style="background-color: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 9999px; text-transform: uppercase;">
+                    Auditoría
+                  </span>
+                </div>
+                <p style="margin: 0; font-size: 12px; color: #94a3b8; font-weight: 500;">
+                  Consolidado oficial de materiales retenidos, folios y clasificación de hallazgos
+                </p>
+              </div>
+              <div style="text-align: right;">
+                <p style="margin: 0; font-size: 11px; color: #cbd5e1; font-weight: 700;">FECHA DE EMISIÓN</p>
+                <p style="margin: 2px 0 0 0; font-size: 14px; color: #ffffff; font-weight: 800;">
+                  ${new Date().toLocaleDateString('es-ES')}
+                </p>
+              </div>
+            </div>
+
+            <!-- KPI Summary Cards -->
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px;">
+              <div style="background-color: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; text-align: center;">
+                <span style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; display: block;">Total Filas Defectos</span>
+                <span style="font-size: 18px; font-weight: 900; color: #0f172a;">${rows.length}</span>
+              </div>
+              <div style="background-color: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; text-align: center;">
+                <span style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; display: block;">Total Paletas</span>
+                <span style="font-size: 18px; font-weight: 900; color: #4338ca;">${totalPaletas}</span>
+              </div>
+              <div style="background-color: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; text-align: center;">
+                <span style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; display: block;">Total Camadas</span>
+                <span style="font-size: 18px; font-weight: 900; color: #d97706;">${totalCamadas}</span>
+              </div>
+              <div style="background-color: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; text-align: center;">
+                <span style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; display: block;">Materiales Distintos</span>
+                <span style="font-size: 18px; font-weight: 900; color: #059669;">${totalMateriales}</span>
+              </div>
+            </div>
+          `;
+        } else {
+          innerHTML += `
+            <div style="background-color: #0f172a; color: #ffffff; padding: 14px 20px; border-radius: 10px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; border: 1px solid #1e293b;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <h2 style="margin: 0; font-size: 16px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; color: #ffffff;">
+                  RESUMEN PBO - CONTROL DE CALIDAD Y DEFECTOS (CONTINUACIÓN)
+                </h2>
+                <span style="background-color: rgba(255, 255, 255, 0.1); color: #cbd5e1; border: 1px solid rgba(255, 255, 255, 0.2); font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 9999px;">
+                  Página ${pageIdx + 1} de ${totalPages}
+                </span>
+              </div>
+              <p style="margin: 0; font-size: 11px; color: #94a3b8; font-weight: 600;">
+                Fecha: ${new Date().toLocaleDateString('es-ES')}
+              </p>
+            </div>
+          `;
+        }
+
+        innerHTML += `
+          <!-- Main Styled Table -->
+          <table style="width: 100%; border-collapse: collapse; font-family: Arial, Helvetica, sans-serif; font-size: 11.5px; color: #000000; border: 2px solid #000000;">
+            <thead>
+              <tr style="background-color: #CFD8DC; text-align: center; vertical-align: middle; font-weight: 900; height: 38px; border-bottom: 2px solid #000000;">
+                <th style="border: 1px solid #000000; padding: 8px 6px; width: 11%; text-transform: uppercase;">MATERIAL</th>
+                <th style="border: 1px solid #000000; padding: 8px 6px; width: 23%; text-transform: uppercase;">DESCRIPCION</th>
+                <th style="border: 1px solid #000000; padding: 8px 6px; width: 13%;">Lote</th>
+                <th style="border: 1px solid #000000; padding: 8px 6px; width: 11%;">#Ticket</th>
+                <th style="border: 1px solid #000000; padding: 8px 6px; width: 15%;">Cantidad total de paletas</th>
+                <th style="border: 1px solid #000000; padding: 8px 6px; width: 9%;">CAMADAS</th>
+                <th style="border: 1px solid #000000; padding: 8px 6px; width: 12%;">Defecto</th>
+                <th style="border: 1px solid #000000; padding: 8px 6px; width: 6%;">NCA</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${chunk.map(r => `
+                <tr style="background-color: #E2EBD8; text-align: center; vertical-align: middle; height: 35px;">
+                  <td style="border: 1px solid #000000; padding: 8px 6px; font-weight: 800; font-family: Courier, monospace;">${r.material}</td>
+                  <td style="border: 1px solid #000000; padding: 8px 8px; text-transform: uppercase; font-weight: 700; text-align: left;">${r.descripcion}</td>
+                  <td style="border: 1px solid #000000; padding: 8px 6px; font-weight: 800; font-family: Courier, monospace;">${r.lote}</td>
+                  <td style="border: 1px solid #000000; padding: 8px 6px; font-weight: 600;">${r.tickets}</td>
+                  <td style="border: 1px solid #000000; padding: 8px 6px; font-weight: 900; font-size: 12.5px;">${r.cantidadPaletas}</td>
+                  <td style="border: 1px solid #000000; padding: 8px 6px; font-weight: 700;">${r.camadas}</td>
+                  <td style="border: 1px solid #000000; padding: 8px 8px; text-transform: uppercase; font-weight: 700; text-align: left;">${r.defecto}</td>
+                  <td style="border: 1px solid #000000; padding: 8px 6px; font-weight: 900;">${r.nca}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <div style="margin-top: 16px; padding-top: 10px; border-top: 1px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #64748b;">
+            <span style="font-weight: 700;">Línea de Envasado — Sistema de Control de Calidad PBO</span>
+            <span style="font-weight: 600;">Página ${pageIdx + 1} de ${totalPages} — Documento Oficial</span>
+          </div>
+        `;
+
+        container.innerHTML = innerHTML;
+        document.body.appendChild(container);
+
+        try {
+          const canvas = await html2canvas(container, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff'
+          });
+
+          const imgData = canvas.toDataURL('image/png');
+          const pageWidth = pdf.internal.pageSize.getWidth();
+          const pageHeight = pdf.internal.pageSize.getHeight();
+          const margin = 8;
+          const maxW = pageWidth - (margin * 2);
+          const maxH = pageHeight - (margin * 2);
+
+          let imgWidth = maxW;
+          let imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+          if (imgHeight > maxH) {
+            imgHeight = maxH;
+            imgWidth = (canvas.width * imgHeight) / canvas.height;
+          }
+
+          const xPos = margin + (maxW - imgWidth) / 2;
+          const yPos = margin;
+
+          if (pageIdx > 0) {
+            pdf.addPage();
+          }
+
+          pdf.addImage(imgData, 'PNG', xPos, yPos, imgWidth, imgHeight);
+        } finally {
+          document.body.removeChild(container);
+        }
+      }
+
+      const fileName = targetLoteId 
+        ? `Resumen_PBO_${targetLoteId}.pdf` 
+        : `Resumen_PBO_Activos_${new Date().toISOString().slice(0, 10)}.pdf`;
+
+      pdf.save(fileName);
+    } catch (err) {
+      console.error('Error al generar PDF:', err);
+      alert('Ocurrió un error al generar el PDF del resumen.');
+    }
+  };
+
   // Canvas Drawing for PBO Report
   const drawPboReportImage = () => {
     const canvas = canvasRef.current;
@@ -1587,14 +1951,23 @@ export default function TabPBO({
               <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-1.5">
                 <ClipboardList className="w-5 h-5 text-indigo-600" /> PBO activos
               </h2>
-              {currentRole === 'calidad' && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setShowNewLoteModal(true)}
-                  className="bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                  onClick={() => setShowSummaryModal(true)}
+                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Ver y Exportar Tabla Resumen PBO"
                 >
-                  <Plus className="w-4 h-4" /> Registrar Retención
+                  <FileText className="w-4 h-4" /> Tabla Resumen PBO
                 </button>
-              )}
+                {currentRole === 'calidad' && (
+                  <button
+                    onClick={() => setShowNewLoteModal(true)}
+                    className="bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" /> Registrar Retención
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Continuous filter controls */}
@@ -1765,6 +2138,14 @@ export default function TabPBO({
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowSummaryModal(true)}
+                        className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
+                        title="Ver Tabla Resumen PBO en pantalla"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> Tabla Resumen PBO
+                      </button>
+
                       <button
                         onClick={drawPboReportImage}
                         className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
@@ -2760,6 +3141,237 @@ export default function TabPBO({
               </div>
 
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 7. INTERACTIVE SUMMARY TABLE MODAL */}
+      {showSummaryModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-6xl w-full shadow-2xl border border-slate-200 dark:border-slate-800 my-auto flex flex-col max-h-[92vh] overflow-hidden">
+            
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shrink-0 border-b border-slate-800">
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 bg-red-600/20 text-red-500 rounded-2xl border border-red-500/30 shrink-0">
+                  <FileText className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg sm:text-xl font-black tracking-wide text-white uppercase">
+                      RESUMEN PBO - CONTROL DE CALIDAD Y DEFECTOS
+                    </h2>
+                    <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
+                      Auditoría
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5 font-medium">
+                    Consolidado oficial de materiales retenidos, folios y clasificación de hallazgos
+                  </p>
+                </div>
+              </div>
+
+              {/* Close Button */}
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="self-end sm:self-auto text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 p-2.5 rounded-2xl transition-all cursor-pointer"
+                title="Cerrar ventana"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filter and Action Bar */}
+            <div className="bg-slate-50 dark:bg-slate-950 p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shrink-0">
+              
+              {/* Scope Switcher & Search */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 grow">
+                <div className="bg-slate-200 dark:bg-slate-800 p-1 rounded-xl flex items-center shrink-0">
+                  <button
+                    onClick={() => setSummaryFilterScope('activos')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      summaryFilterScope === 'activos'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                    PBO Activos ({lotes.filter(l => l.estatus_general === 'Abierto' || l.estatus_general !== 'Cerrado').length})
+                  </button>
+                  <button
+                    onClick={() => setSummaryFilterScope('todos')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      summaryFilterScope === 'todos'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-slate-400 inline-block"></span>
+                    Todos los PBOs ({lotes.length})
+                  </button>
+                </div>
+
+                {/* Quick Search */}
+                <div className="relative grow max-w-md">
+                  <input
+                    type="text"
+                    value={summarySearch}
+                    onChange={(e) => setSummarySearch(e.target.value)}
+                    placeholder="Filtrar por material, lote, ticket o defecto..."
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl py-2 px-3 pl-9 text-xs text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium"
+                  />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  {summarySearch && (
+                    <button
+                      onClick={() => setSummarySearch('')}
+                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Export Buttons */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={copySummaryToClipboard}
+                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
+                  title="Copiar datos tabulados para pegar en Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Copiar Tabla (Excel)
+                </button>
+
+                <button
+                  onClick={() => generateSummaryPDF()}
+                  className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
+                  title="Descargar documento PDF oficial"
+                >
+                  <Download className="w-4 h-4" />
+                  Exportar PDF
+                </button>
+              </div>
+            </div>
+
+            {/* KPI Metrics Row */}
+            <div className="bg-slate-100/70 dark:bg-slate-800/40 px-6 py-3 border-b border-slate-200 dark:border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs shrink-0">
+              <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">Total Filas Defectos</span>
+                <span className="font-extrabold text-slate-900 dark:text-white text-sm bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-lg">{filteredSummaryRows.length}</span>
+              </div>
+              <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">Total Paletas</span>
+                <span className="font-extrabold text-indigo-600 dark:text-indigo-400 text-sm bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded-lg">
+                  {filteredSummaryRows.reduce((a, b) => a + b.cantidadPaletas, 0)}
+                </span>
+              </div>
+              <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">Total Camadas</span>
+                <span className="font-extrabold text-amber-600 dark:text-amber-400 text-sm bg-amber-50 dark:bg-amber-950 px-2 py-0.5 rounded-lg">
+                  {filteredSummaryRows.reduce((a, b) => a + b.camadas, 0)}
+                </span>
+              </div>
+              <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">Materiales Distintos</span>
+                <span className="font-extrabold text-emerald-600 dark:text-emerald-400 text-sm bg-emerald-50 dark:bg-emerald-950 px-2 py-0.5 rounded-lg">
+                  {new Set(filteredSummaryRows.map(r => r.material)).size}
+                </span>
+              </div>
+            </div>
+
+            {/* Table Content Area */}
+            <div className="p-4 sm:p-6 overflow-auto grow">
+              {filteredSummaryRows.length === 0 ? (
+                <div className="py-12 text-center text-slate-400">
+                  <FileText className="w-12 h-12 mx-auto mb-3 opacity-30 text-slate-500" />
+                  <p className="font-bold text-sm text-slate-600 dark:text-slate-300">No se encontraron registros de resumen</p>
+                  <p className="text-xs mt-1">Asegúrese de tener expedientes PBO registrados con sus respectivas paletas.</p>
+                </div>
+              ) : (
+                <div className="rounded-2xl border-2 border-slate-800 overflow-hidden shadow-xs">
+                  <div className="bg-[#CFD8DC] dark:bg-slate-800 text-slate-900 dark:text-slate-100 py-3 text-center border-b-2 border-slate-800">
+                    <h3 className="font-black text-sm uppercase tracking-wider">
+                      RESUMEN PBO - CONTROL DE CALIDAD Y DEFECTOS
+                    </h3>
+                    <p className="text-[11px] font-bold text-slate-600 dark:text-slate-400 mt-0.5">
+                      Fecha de emisión: {new Date().toLocaleDateString('es-ES')} — Total de Filas: {filteredSummaryRows.length}
+                    </p>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-[#CFD8DC] dark:bg-slate-800 text-slate-900 dark:text-white font-black uppercase text-[11px] text-center tracking-wider border-b-2 border-slate-800">
+                          <th className="py-2.5 px-3 border-r border-slate-800 w-[11%]">MATERIAL</th>
+                          <th className="py-2.5 px-3 border-r border-slate-800 w-[23%]">DESCRIPCION</th>
+                          <th className="py-2.5 px-3 border-r border-slate-800 w-[13%]">Lote</th>
+                          <th className="py-2.5 px-3 border-r border-slate-800 w-[11%]">#Ticket</th>
+                          <th className="py-2.5 px-3 border-r border-slate-800 w-[15%]">Cantidad total de paletas</th>
+                          <th className="py-2.5 px-3 border-r border-slate-800 w-[9%]">CAMADAS</th>
+                          <th className="py-2.5 px-3 border-r border-slate-800 w-[12%]">Defecto</th>
+                          <th className="py-2.5 px-3 w-[6%]">NCA</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {filteredSummaryRows.map((row, idx) => (
+                          <tr 
+                            key={`${row.id_pbo}-${idx}`}
+                            className="bg-[#E2EBD8] dark:bg-slate-900/90 hover:bg-[#d6e3c9] dark:hover:bg-slate-800 transition-colors text-slate-900 dark:text-slate-100 text-center font-medium"
+                          >
+                            <td className="py-3 px-2 border-r border-slate-800 font-mono font-bold text-slate-900 dark:text-white">
+                              {row.material}
+                            </td>
+                            <td className="py-3 px-3 border-r border-slate-800 font-extrabold uppercase text-slate-900 dark:text-slate-100 text-left">
+                              {row.descripcion}
+                            </td>
+                            <td className="py-3 px-2 border-r border-slate-800 font-mono font-bold text-slate-900 dark:text-indigo-300">
+                              {row.lote}
+                            </td>
+                            <td className="py-3 px-2 border-r border-slate-800 font-mono font-bold text-slate-800 dark:text-slate-200">
+                              {row.tickets}
+                            </td>
+                            <td className="py-3 px-2 border-r border-slate-800 font-black text-slate-900 dark:text-white text-sm">
+                              {row.cantidadPaletas}
+                            </td>
+                            <td className="py-3 px-2 border-r border-slate-800 font-bold text-slate-800 dark:text-slate-300">
+                              {row.camadas}
+                            </td>
+                            <td className="py-3 px-3 border-r border-slate-800 font-bold text-slate-900 dark:text-red-300 uppercase text-left">
+                              {row.defecto}
+                            </td>
+                            <td className="py-3 px-2 font-black text-slate-900 dark:text-amber-300">
+                              {row.nca}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-900 text-slate-300 p-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs shrink-0">
+              <span className="font-medium text-slate-400">
+                Línea de Envasado — Sistema de Control de Calidad PBO
+              </span>
+              <div className="flex items-center gap-3">
+                {copiedSummaryToast && (
+                  <span className="text-emerald-400 font-bold flex items-center gap-1 animate-fade-in">
+                    <CheckCircle className="w-4 h-4" /> ¡Tabla copiada al portapapeles!
+                  </span>
+                )}
+                <button
+                  onClick={() => setShowSummaryModal(false)}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-4 py-2 rounded-xl transition-all cursor-pointer"
+                >
+                  Cerrar Resumen
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}
