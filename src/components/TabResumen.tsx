@@ -206,15 +206,15 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     text += `🔄 *7. REPROCESOS REALIZADOS DURANTE EL TURNO*
 `;
     if (matchingReprocesos.length > 0) {
-      const groupedRepros: Record<string, { sap: string; orden: string; lote: string; tickets: string[]; paletas: number; camadas: number; }> = {};
+      const groupedRepros: Record<string, { material: string; defectoGeneral: string; lote: string; tickets: string[]; paletas: number; camadas: number; }> = {};
       matchingReprocesos.forEach(r => {
         const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
         if (!pboInfo) return;
-        const catalogItem = CATALOGO_PRODUCTOS_PBO.find(c => c.nombre.toUpperCase() === pboInfo.producto.toUpperCase());
-        const codigoSap = catalogItem ? catalogItem.codigo : 'N/D';
-        const key = `${codigoSap}-${pboInfo.orden}-${pboInfo.lote}`;
+        const material = pboInfo.producto || 'N/D';
+        const defectoGeneral = pboInfo.defecto_general || 'N/D';
+        const key = `${material}-${defectoGeneral}-${pboInfo.lote}`;
         if (!groupedRepros[key]) {
-          groupedRepros[key] = { sap: codigoSap, orden: pboInfo.orden, lote: pboInfo.lote, tickets: [], paletas: 0, camadas: 0 };
+          groupedRepros[key] = { material, defectoGeneral, lote: pboInfo.lote, tickets: [], paletas: 0, camadas: 0 };
         }
         if (r.nuevo_ticket_reprocesado && r.nuevo_ticket_reprocesado !== 'N/A') {
            groupedRepros[key].tickets.push(r.nuevo_ticket_reprocesado);
@@ -226,14 +226,15 @@ export default function TabResumen({ reporte }: TabResumenProps) {
       });
       
       const groups = Object.values(groupedRepros);
-      text += `⚠️ *Total:* ${groups.length} código(s) SAP con reproceso(s):
+      text += `⚠️ *Total:* ${groups.length} material(es) con reproceso(s):
 `;
       groups.forEach(group => {
-        text += `• *SAP:* ${group.sap} | *Lote:* ${group.lote} | *Orden:* ${group.orden}
+        const camadasDisplay = group.camadas % 1 === 0 ? group.camadas : Number(group.camadas.toFixed(2));
+        text += `• *Material:* ${group.material} | *Lote:* ${group.lote} | *Defecto General:* ${group.defectoGeneral}
 `;
         text += `  - *Tickets Reprocesados:* ${group.tickets.join(', ') || 'N/A'}
 `;
-        text += `  - *Total Generado:* ${group.paletas} Paletas, ${group.camadas} Camadas
+        text += `  - *Total Generado:* ${group.paletas} Paletas, ${camadasDisplay} Camadas
 `;
       });
     } else {
