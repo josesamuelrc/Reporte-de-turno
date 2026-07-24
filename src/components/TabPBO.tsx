@@ -377,6 +377,7 @@ export default function TabPBO({
     nuevo_ticket_reprocesado: '',
     paletas_nuevas: 1,
     camadas_sueltas: 0,
+    cantidad_envases: 0,
     cantidad_unidades: 1,
   });
 
@@ -772,12 +773,16 @@ export default function TabPBO({
 
       const ticketsGeneradosStr = inputTickets.join(', ');
       const reproId = `REP-${Date.now()}`;
+      const finalCamadas = reproForm.cantidad_envases > 0
+        ? Number((reproForm.cantidad_envases / getCansPerCamada()).toFixed(2))
+        : (reproForm.camadas_sueltas || 0);
+
       const nuevoRep: Reproceso = {
         id: reproId,
         id_pbo: selectedLoteId,
         tickets_originales_consumidos: consumedTicketsStr,
         nuevo_ticket_reprocesado: ticketsGeneradosStr,
-        camadas_sueltas: reproForm.camadas_sueltas || 0,
+        camadas_sueltas: finalCamadas,
         paletas_nuevas: reproForm.paletas_nuevas || 0,
         estatus_calidad: 'Aprobado',
         estatus_logistica: 'Confirmado',
@@ -801,6 +806,7 @@ export default function TabPBO({
         nuevo_ticket_reprocesado: '',
         paletas_nuevas: 1,
         camadas_sueltas: 0,
+        cantidad_envases: 0,
         cantidad_unidades: 1
       });
       setSelectedOriginalTickets([]);
@@ -2106,7 +2112,7 @@ export default function TabPBO({
                           <h4 className="text-xs font-extrabold text-orange-700 uppercase tracking-widest flex items-center gap-1.5 border-b border-orange-100 pb-2">
                             <RefreshCw className="w-4 h-4" /> Registrar Nuevo Reproceso de Unidad
                           </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div>
                               <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
                                 Paletas Completas
@@ -2129,17 +2135,50 @@ export default function TabPBO({
                               </label>
                               <input
                                 type="number"
+                                step="any"
                                 min="0"
-                                value={reproForm.camadas_sueltas}
+                                value={reproForm.camadas_sueltas || ''}
                                 onChange={(e) => {
-                                  const val = Math.max(0, parseInt(e.target.value) || 0);
-                                  setReproForm(prev => ({ ...prev, camadas_sueltas: val }));
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setReproForm(prev => ({ 
+                                    ...prev, 
+                                    camadas_sueltas: val,
+                                    cantidad_envases: Math.round(val * getCansPerCamada())
+                                  }));
                                 }}
                                 className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-bold"
                               />
                             </div>
 
-                            <div className="sm:col-span-2">
+                            <div>
+                              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                                Cantidad de Envases
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                placeholder="Ej: 8000"
+                                value={reproForm.cantidad_envases || ''}
+                                onChange={(e) => {
+                                  const envasesVal = parseFloat(e.target.value) || 0;
+                                  const computedCamadas = envasesVal > 0 ? Number((envasesVal / getCansPerCamada()).toFixed(2)) : 0;
+                                  setReproForm(prev => ({ 
+                                    ...prev, 
+                                    cantidad_envases: envasesVal,
+                                    camadas_sueltas: computedCamadas 
+                                  }));
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-bold"
+                              />
+                              {reproForm.cantidad_envases > 0 && (
+                                <span className="text-[10px] text-indigo-600 font-semibold block mt-1">
+                                  = {(reproForm.cantidad_envases / getCansPerCamada()).toFixed(2)} camadas
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="sm:col-span-3">
                               <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
                                 Tickets de las Unidades Reprocesadas (separe por espacios, comas o saltos de línea) - {reproForm.nuevo_ticket_reprocesado.split(/[\s,;\n]+/).filter(t => t.trim().length > 0).length} detectados
                               </label>
@@ -2216,9 +2255,10 @@ export default function TabPBO({
                                         <td className="py-2 px-3 text-center">
                                           <input
                                             type="number"
+                                            step="any"
                                             min="0"
                                             value={editingRepro.camadas_sueltas}
-                                            onChange={(e) => setEditingRepro({ ...editingRepro, camadas_sueltas: parseInt(e.target.value) || 0 })}
+                                            onChange={(e) => setEditingRepro({ ...editingRepro, camadas_sueltas: parseFloat(e.target.value) || 0 })}
                                             className="w-16 bg-white border border-slate-200 rounded p-1 text-center text-xs font-semibold"
                                           />
                                         </td>

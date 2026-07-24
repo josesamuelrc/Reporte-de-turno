@@ -839,8 +839,8 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                 <table className="w-full text-left border-collapse text-[11px]">
                   <thead className="bg-indigo-50/50 text-indigo-800 font-bold border-b border-indigo-100">
                     <tr>
-                      <th className="py-1.5 px-2.5">Código SAP</th>
-                      <th className="py-1.5 px-2.5">Orden</th>
+                      <th className="py-1.5 px-2.5">Material</th>
+                      <th className="py-1.5 px-2.5">Defecto General</th>
                       <th className="py-1.5 px-2.5">Lote</th>
                       <th className="py-1.5 px-2.5">Tickets Reprocesados (Nuevos)</th>
                       <th className="py-1.5 px-2.5">Total Generado</th>
@@ -848,10 +848,10 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {(() => {
-                      // Group by PBO (which gives us SAP, Orden, Lote)
+                      // Group by PBO (which gives us Material, Defecto General, Lote)
                       const groupedRepros: Record<string, {
-                        sap: string;
-                        orden: string;
+                        material: string;
+                        defectoGeneral: string;
                         lote: string;
                         tickets: string[];
                         paletas: number;
@@ -862,14 +862,14 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                         const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
                         if (!pboInfo) return;
                         
-                        const catalogItem = CATALOGO_PRODUCTOS_PBO.find(c => c.nombre.toUpperCase() === pboInfo.producto.toUpperCase());
-                        const codigoSap = catalogItem ? catalogItem.codigo : 'N/D';
-                        const key = `${codigoSap}-${pboInfo.orden}-${pboInfo.lote}`;
+                        const material = pboInfo.producto || 'N/D';
+                        const defectoGeneral = pboInfo.defecto_general || 'N/D';
+                        const key = `${material}-${defectoGeneral}-${pboInfo.lote}`;
 
                         if (!groupedRepros[key]) {
                           groupedRepros[key] = {
-                            sap: codigoSap,
-                            orden: pboInfo.orden,
+                            material,
+                            defectoGeneral,
                             lote: pboInfo.lote,
                             tickets: [],
                             paletas: 0,
@@ -888,12 +888,12 @@ export default function TabResumen({ reporte }: TabResumenProps) {
 
                       return Object.values(groupedRepros).map((group, idx) => (
                         <tr key={idx} className="hover:bg-indigo-50/20">
-                          <td className="py-1.5 px-2.5 font-bold font-mono">{group.sap}</td>
-                          <td className="py-1.5 px-2.5 font-mono">{group.orden}</td>
+                          <td className="py-1.5 px-2.5 font-bold">{group.material}</td>
+                          <td className="py-1.5 px-2.5 text-slate-600 font-medium">{group.defectoGeneral}</td>
                           <td className="py-1.5 px-2.5 font-mono">{group.lote}</td>
                           <td className="py-1.5 px-2.5 font-mono text-indigo-700 font-semibold">{group.tickets.join(', ') || 'N/A'}</td>
                           <td className="py-1.5 px-2.5 font-semibold text-slate-800">
-                            {group.paletas} Paletas, {group.camadas} Camadas
+                            {group.paletas} Paletas, {group.camadas % 1 === 0 ? group.camadas : Number(group.camadas.toFixed(2))} Camadas
                           </td>
                         </tr>
                       ));
