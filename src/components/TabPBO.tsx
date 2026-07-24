@@ -27,7 +27,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { LotePBO, Paleta, Reproceso } from '../types';
-import { getLotesPBO, saveLotePBO, deleteLotePBO, getPaletasPBO, savePaletasPBO, getReprocesosPBO, saveReprocesoPBO, deleteReprocesoPBO } from '../db';
+import { getLotesPBO, saveLotePBO, deleteLotePBO, getPaletasPBO, savePaletasPBO, getReprocesosPBO, saveReprocesoPBO, deleteReprocesoPBO, deletePaletaPBO } from '../db';
 
 export interface CatalogoProductoPBO {
   codigo: string;
@@ -652,6 +652,62 @@ export default function TabPBO({
     } catch (err) {
       console.error(err);
       alert("Error al actualizar paletas.");
+    }
+  };
+
+  // Add a pallet to an already existing PBO
+  const handleAddPaleta = async (loteId: string, defectoGeneral: string) => {
+    if (currentRole !== 'calidad') {
+      alert("Acceso denegado: Solo Calidad puede agregar paletas.");
+      return;
+    }
+    const lotePaletas = paletas.filter(p => p.id_pbo === loteId);
+    const existingNum = lotePaletas.length + 1;
+    const newPaletaId = `${loteId}-P${Date.now()}`;
+    const newPaleta: Paleta = {
+      id: newPaletaId,
+      id_pbo: loteId,
+      nro_ticket: `TKT-${loteId}-${existingNum}`,
+      camadas_sueltas: 0,
+      defecto: defectoGeneral || 'Defecto PBO',
+      nca: '2.5',
+      estatus: 'Sin reprocesar',
+      creado_el: new Date().toISOString()
+    };
+    
+    const updatedPaletas = [...paletas, newPaleta];
+    setPaletas(updatedPaletas);
+    try {
+      await savePaletasPBO([newPaleta]);
+      setRefreshTrigger(p => p + 1);
+      alert(`¡Paleta agregada con éxito! Ticket sugerido: ${newPaleta.nro_ticket}`);
+    } catch (err) {
+      console.error(err);
+      alert("Error al agregar la paleta.");
+    }
+  };
+
+  // Remove a pallet from an existing PBO
+  const handleRemovePaleta = async (paletaId: string, ticketNum: string) => {
+    if (currentRole !== 'calidad') {
+      alert("Acceso denegado: Solo Calidad puede eliminar paletas.");
+      return;
+    }
+    if (!window.confirm(`¿Está seguro de eliminar la paleta con ticket "${ticketNum}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    
+    try {
+      await deletePaletaPBO(paletaId);
+      setPaletas(prev => prev.filter(p => p.id !== paletaId));
+      if (selectedOriginalTickets.includes(ticketNum)) {
+        setSelectedOriginalTickets(prev => prev.filter(t => t !== ticketNum));
+      }
+      setRefreshTrigger(p => p + 1);
+      alert("Paleta eliminada con éxito.");
+    } catch (err) {
+      console.error(err);
+      alert("Error al eliminar la paleta.");
     }
   };
 
@@ -1750,22 +1806,39 @@ export default function TabPBO({
                   {/* TAB 2: PALETAS RETENIDAS */}
                   {pboTabActive === 'paletas' && (
                     <form onSubmit={handleUpdatePaletas} className="space-y-4">
+                      {currentRole === 'calidad' && activeLote.estatus_general !== 'Cerrado' && (
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 border border-slate-200/60 p-3.5 rounded-xl">
+                          <div className="text-xs text-slate-600 font-medium">
+                            Administre las paletas de este expediente. Puede añadir nuevos tickets físicos o eliminar existentes si es necesario.
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleAddPaleta(activeLote.id_pbo, activeLote.defecto_general)}
+                            className="flex items-center justify-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-xs shrink-0"
+                          >
+                            <Plus className="w-4 h-4" /> Añadir Paleta
+                          </button>
+                        </div>
+                      )}
+                      
                       <div className="overflow-x-auto rounded-xl border border-slate-200">
                         <table className="w-full text-left border-collapse min-w-[500px]">
                           <thead>
                             <tr className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase border-b border-slate-200">
-                              <th className="py-2.5 px-3">Paleta</th>
                               <th className="py-2.5 px-3">Ticket Físico</th>
+                              <th className="py-2.5 px-3">Paleta</th>
                               <th className="py-2.5 px-3">Camadas</th>
                               <th className="py-2.5 px-3">NCA</th>
                               <th className="py-2.5 px-3">Defecto específico</th>
                               <th className="py-2.5 px-3">Estatus</th>
+                              {currentRole === 'calidad' && activeLote.estatus_general !== 'Cerrado' && (
+                                <th className="py-2.5 px-3 text-center">Eliminar</th>
+                              )}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 text-xs">
                             {activeLotePaletas.map((p, idx) => (
                               <tr key={p.id}>
-                                <td className="py-2 px-3 font-mono font-bold text-slate-500">{p.id.split('-').pop()}</td>
                                 <td className="py-1 px-1.5">
                                   <input
                                     type="text"
@@ -1781,6 +1854,11 @@ export default function TabPBO({
                                     disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
                                     className="bg-slate-50 border border-slate-200 text-xs p-1 rounded-md font-mono w-28 disabled:opacity-75"
                                   />
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span className={`text-xs font-black uppercase tracking-wider ${p.camadas_sueltas === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                    {p.camadas_sueltas === 0 ? 'Completa ✅' : 'Incompleta ⚠️'}
+                                  </span>
                                 </td>
                                 <td className="py-1 px-1.5">
                                   <input
@@ -1843,6 +1921,18 @@ export default function TabPBO({
                                     <option value="Reprocesado">🔄 Reprocesado</option>
                                   </select>
                                 </td>
+                                {currentRole === 'calidad' && activeLote.estatus_general !== 'Cerrado' && (
+                                  <td className="py-2 px-3 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemovePaleta(p.id, p.nro_ticket)}
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
+                                      title="Eliminar Paleta"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </td>
+                                )}
                               </tr>
                             ))}
                           </tbody>

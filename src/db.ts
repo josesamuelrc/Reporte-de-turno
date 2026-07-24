@@ -1231,6 +1231,22 @@ export const deleteReprocesoPBO = async (id: string): Promise<void> => {
   setLocalData('pbo_reprocesos', reprocesos);
 };
 
+export const deletePaletaPBO = async (id: string): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('pbo_paletas').delete().eq('id', id);
+      if (error) throw error;
+      return;
+    } catch (e) {
+      console.error("Supabase Delete Paleta PBO error", e);
+    }
+  }
+  let paletas = getLocalData('pbo_paletas');
+  paletas = paletas.filter((p: Paleta) => p.id !== id);
+  setLocalData('pbo_paletas', paletas);
+};
+
 export const getRocePruebas = async (): Promise<RocePrueba[]> => {
   const supabase = getSupabaseClient();
   if (supabase) {

@@ -63,6 +63,8 @@ export default function App() {
   const [dbConnected, setDbConnected] = useState(false);
   const [logoSrc, setLogoSrc] = useState<string>('/logo.png');
 
+  const [isScrolled, setIsScrolled] = useState(false);
+
   // Warning when reloading the page to prevent unsaved data loss
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -71,8 +73,19 @@ export default function App() {
       return e.returnValue;
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    const handleScroll = () => {
+      if (window.scrollY > 80) {
+        setIsScrolled(true);
+      } else {
+        setIsScrolled(false);
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('scroll', handleScroll);
     };
   }, []);
 
@@ -433,7 +446,7 @@ export default function App() {
       </div>
 
       {/* HEADER BAR (Hidden when printing) */}
-      <header className="bg-white text-slate-900 border-b border-slate-200 sticky top-0 z-40 print:hidden shadow-xs h-auto sm:h-16 py-3 sm:py-0 flex items-center">
+      <header className="bg-white text-slate-900 border-b border-slate-200 relative print:hidden shadow-xs h-auto sm:h-16 py-3 sm:py-0 flex items-center">
         <div className="max-w-7xl mx-auto w-full px-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
             <CompanyLogo className="h-8 sm:h-10 w-auto object-contain shrink-0" />
@@ -450,28 +463,53 @@ export default function App() {
             </div>
           </div>
 
-          {/* Module Switcher Toggle */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full sm:w-auto justify-center">
-            <button
-              onClick={() => setActiveModule('inspeccion')}
-              className={`flex-1 sm:flex-initial px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                activeModule === 'inspeccion'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              📋 Inspección
-            </button>
-            <button
-              onClick={() => setActiveModule('pbo')}
-              className={`flex-1 sm:flex-initial px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                activeModule === 'pbo'
-                  ? 'bg-orange-650 text-white shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              🛡️ PBO
-            </button>
+          {/* Module Switcher and Actions Toggle */}
+          <div className="flex flex-col xs:flex-row items-center gap-2.5 w-full sm:w-auto justify-end">
+            {/* Module Switcher Toggle */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full xs:w-auto justify-center">
+              <button
+                onClick={() => setActiveModule('inspeccion')}
+                className={`flex-1 xs:flex-initial px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeModule === 'inspeccion'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                📋 Inspección
+              </button>
+              <button
+                onClick={() => setActiveModule('pbo')}
+                className={`flex-1 xs:flex-initial px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeModule === 'pbo'
+                    ? 'bg-orange-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                🛡️ PBO
+              </button>
+            </div>
+
+            {/* Quick Actions (Save / Terminar) */}
+            {currentRole === 'calidad' && editable && (
+              <div className="flex items-center gap-2 w-full xs:w-auto justify-center">
+                <button
+                  onClick={() => handleGuardarAvance(true)}
+                  className="flex-1 xs:flex-initial flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer shadow-xs transition-all whitespace-nowrap"
+                  title="Guardar Avance de Reporte"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Guardar
+                </button>
+                <button
+                  onClick={handleTerminarTurno}
+                  className="flex-1 xs:flex-initial flex items-center justify-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer shadow-xs transition-all whitespace-nowrap"
+                  title="Terminar y Finalizar Turno"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Terminar Turno
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -690,51 +728,50 @@ export default function App() {
         </main>
 
       {/* FOOTER ACTION BAR (Hidden when printing) */}
-      {activeModule === 'inspeccion' && currentRole === 'calidad' && (
+      {activeModule === 'inspeccion' && currentRole === 'calidad' && !editable && (
         <footer className="bg-white border-t border-slate-200 py-4 px-6 print:hidden shadow-xs">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
             
             <div>
-              {!editable && (
-                <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" /> REPORTE FINALIZADO Y CONSOLIDADO
-                </span>
-              )}
+              <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" /> REPORTE FINALIZADO Y CONSOLIDADO
+              </span>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {!editable && (
-                <button
-                  onClick={handleComenzarNuevoTurno}
-                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-xs transition-all"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  Iniciar Nuevo Turno
-                </button>
-              )}
-
-              {editable && (
-                <>
-                  <button
-                    onClick={() => handleGuardarAvance(true)}
-                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md shadow-indigo-100 transition-all"
-                  >
-                    <Save className="w-4 h-4" />
-                    Guardar Avance
-                  </button>
-                  <button
-                    onClick={handleTerminarTurno}
-                    className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-xs transition-all"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    Terminar Turno
-                  </button>
-                </>
-              )}
+              <button
+                onClick={handleComenzarNuevoTurno}
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-xs transition-all"
+              >
+                <PlusCircle className="w-4 h-4" />
+                Iniciar Nuevo Turno
+              </button>
             </div>
 
           </div>
         </footer>
+      )}
+
+      {/* Floating Action Bar when scrolling (Hidden when printing) */}
+      {currentRole === 'calidad' && editable && isScrolled && (
+        <div className="fixed top-4 right-4 z-50 flex items-center gap-2 bg-white/95 backdrop-blur-md p-2 rounded-2xl shadow-xl border border-slate-200/80 transition-all duration-300 print:hidden animate-fade-in">
+          <button
+            onClick={() => handleGuardarAvance(true)}
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer shadow-sm transition-all whitespace-nowrap"
+            title="Guardar Avance de Reporte"
+          >
+            <Save className="w-3.5 h-3.5" />
+            Guardar
+          </button>
+          <button
+            onClick={handleTerminarTurno}
+            className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer shadow-sm transition-all whitespace-nowrap"
+            title="Terminar y Finalizar Turno"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Terminar Turno
+          </button>
+        </div>
       )}
 
     </div>
