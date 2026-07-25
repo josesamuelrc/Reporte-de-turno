@@ -390,6 +390,10 @@ export default function TabPBO({
     camadas_sueltas: 0,
     cantidad_envases: 0,
     cantidad_unidades: 1,
+    check_liberado: false,
+    check_liberado_parcial: false,
+    cantidad_liberada: '',
+    check_espera_formato: false,
   });
 
   const [editingRepro, setEditingRepro] = useState<Reproceso | null>(null);
@@ -797,6 +801,10 @@ export default function TabPBO({
         paletas_nuevas: reproForm.paletas_nuevas || 0,
         estatus_calidad: 'Aprobado',
         estatus_logistica: 'Confirmado',
+        check_liberado: reproForm.check_liberado,
+        check_liberado_parcial: reproForm.check_liberado_parcial,
+        cantidad_liberada: reproForm.check_liberado_parcial ? reproForm.cantidad_liberada : '',
+        check_espera_formato: reproForm.check_espera_formato,
         usuario_registro: usuarioRegistro || 'CALIDAD (REPROCESO)',
         creado_el: new Date().toISOString(),
         fecha_registro: cabeceraFecha,
@@ -818,7 +826,11 @@ export default function TabPBO({
         paletas_nuevas: 1,
         camadas_sueltas: 0,
         cantidad_envases: 0,
-        cantidad_unidades: 1
+        cantidad_unidades: 1,
+        check_liberado: false,
+        check_liberado_parcial: false,
+        cantidad_liberada: '',
+        check_espera_formato: false,
       });
       setSelectedOriginalTickets([]);
       setRefreshTrigger(p => p + 1);
@@ -826,6 +838,36 @@ export default function TabPBO({
     } catch (err) {
       console.error(err);
       alert("Error al registrar reproceso.");
+    }
+  };
+
+  const handleToggleReproCheck = async (repro: Reproceso, field: 'check_liberado' | 'check_liberado_parcial' | 'check_espera_formato') => {
+    if (currentRole !== 'calidad') {
+      alert("Acceso denegado: Solo Calidad puede modificar los checks de reproceso.");
+      return;
+    }
+    const newValue = !repro[field];
+    let newCant = repro.cantidad_liberada || '';
+
+    if (field === 'check_liberado_parcial' && newValue) {
+      const input = window.prompt("Indique la cantidad liberada parcialmente (ej: 2 paletas, 1500 latas):", newCant || "1 paleta");
+      if (input !== null) {
+        newCant = input;
+      }
+    }
+
+    const updatedRepro: Reproceso = {
+      ...repro,
+      [field]: newValue,
+      cantidad_liberada: field === 'check_liberado_parcial' ? newCant : repro.cantidad_liberada
+    };
+
+    try {
+      await saveReprocesoPBO(updatedRepro);
+      setReprocesos(prev => prev.map(r => r.id === repro.id ? updatedRepro : r));
+    } catch (e) {
+      console.error(e);
+      alert("Error al actualizar checks de reproceso.");
     }
   };
 
@@ -2579,6 +2621,65 @@ export default function TabPBO({
                                 className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-mono font-bold"
                               />
                             </div>
+
+                            {/* Checks / Dictamen de Liberación */}
+                            <div className="sm:col-span-3 bg-white p-3.5 border border-slate-200 rounded-xl space-y-2.5">
+                              <label className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block">
+                                Checks de Liberación de Reproceso
+                              </label>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                                <label className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                                  reproForm.check_liberado ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700'
+                                }`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={reproForm.check_liberado}
+                                    onChange={(e) => setReproForm(prev => ({ ...prev, check_liberado: e.target.checked }))}
+                                    className="rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
+                                  />
+                                  <span>✅ Liberado</span>
+                                </label>
+
+                                <label className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                                  reproForm.check_liberado_parcial ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700'
+                                }`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={reproForm.check_liberado_parcial}
+                                    onChange={(e) => setReproForm(prev => ({ ...prev, check_liberado_parcial: e.target.checked }))}
+                                    className="rounded text-amber-600 focus:ring-amber-500 h-4 w-4 cursor-pointer"
+                                  />
+                                  <span>⚠️ Liberado Parcialmente</span>
+                                </label>
+
+                                <label className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                                  reproForm.check_espera_formato ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700'
+                                }`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={reproForm.check_espera_formato}
+                                    onChange={(e) => setReproForm(prev => ({ ...prev, check_espera_formato: e.target.checked }))}
+                                    className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                                  />
+                                  <span>📋 A espera de Formato</span>
+                                </label>
+                              </div>
+
+                              {reproForm.check_liberado_parcial && (
+                                <div className="pt-1.5 animate-fadeIn">
+                                  <label className="text-[10px] font-extrabold text-amber-800 uppercase block mb-1">
+                                    Indicar Cantidad Liberada (Parcial):
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ej: 2 paletas, 1500 latas, 4 camadas"
+                                    value={reproForm.cantidad_liberada}
+                                    onChange={(e) => setReproForm(prev => ({ ...prev, cantidad_liberada: e.target.value }))}
+                                    className="w-full bg-amber-50/60 border border-amber-300 rounded-lg text-xs p-2 font-bold text-amber-950 focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                                  />
+                                </div>
+                              )}
+                            </div>
                           </div>
                           
                           <div className="flex justify-end pt-2">
@@ -2607,6 +2708,7 @@ export default function TabPBO({
                                   <th className="py-2.5 px-3">Tickets Generados</th>
                                   <th className="py-2.5 px-3 text-center">Paletas</th>
                                   <th className="py-2.5 px-3 text-center">Camadas</th>
+                                  <th className="py-2.5 px-3">Estatus / Checks de Liberación</th>
                                   <th className="py-2.5 px-3 text-right">Acciones</th>
                                 </tr>
                               </thead>
@@ -2643,6 +2745,46 @@ export default function TabPBO({
                                             className="w-16 bg-white border border-slate-200 rounded p-1 text-center text-xs font-semibold"
                                           />
                                         </td>
+                                        <td className="py-2 px-3">
+                                          <div className="space-y-1 text-[10px]">
+                                            <label className="flex items-center gap-1 cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={editingRepro.check_liberado || false}
+                                                onChange={(e) => setEditingRepro({ ...editingRepro, check_liberado: e.target.checked })}
+                                                className="rounded text-emerald-600"
+                                              />
+                                              <span className="font-bold text-emerald-700">Liberado</span>
+                                            </label>
+                                            <label className="flex items-center gap-1 cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={editingRepro.check_liberado_parcial || false}
+                                                onChange={(e) => setEditingRepro({ ...editingRepro, check_liberado_parcial: e.target.checked })}
+                                                className="rounded text-amber-600"
+                                              />
+                                              <span className="font-bold text-amber-700">Lib. Parcial</span>
+                                            </label>
+                                            {editingRepro.check_liberado_parcial && (
+                                              <input
+                                                type="text"
+                                                placeholder="Cantidad liberada"
+                                                value={editingRepro.cantidad_liberada || ''}
+                                                onChange={(e) => setEditingRepro({ ...editingRepro, cantidad_liberada: e.target.value })}
+                                                className="w-full bg-amber-50 border border-amber-200 rounded p-1 text-[10px] font-bold"
+                                              />
+                                            )}
+                                            <label className="flex items-center gap-1 cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={editingRepro.check_espera_formato || false}
+                                                onChange={(e) => setEditingRepro({ ...editingRepro, check_espera_formato: e.target.checked })}
+                                                className="rounded text-indigo-600"
+                                              />
+                                              <span className="font-bold text-indigo-700">A espera de Formato</span>
+                                            </label>
+                                          </div>
+                                        </td>
                                         <td className="py-2 px-3 text-right">
                                           <div className="flex justify-end gap-1.5">
                                             <button
@@ -2668,6 +2810,51 @@ export default function TabPBO({
                                       <td className="py-2 px-3 font-mono font-bold text-indigo-700">{r.nuevo_ticket_reprocesado}</td>
                                       <td className="py-2 px-3 text-center font-semibold">{r.paletas_nuevas ?? 0}</td>
                                       <td className="py-2 px-3 text-center font-semibold">{r.camadas_sueltas || '0'}</td>
+                                      <td className="py-2 px-3">
+                                        <div className="flex flex-wrap items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleToggleReproCheck(r, 'check_liberado')}
+                                            disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
+                                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
+                                              r.check_liberado
+                                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                            }`}
+                                            title="Clic para activar/desactivar Liberado"
+                                          >
+                                            ✅ Liberado
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => handleToggleReproCheck(r, 'check_liberado_parcial')}
+                                            disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
+                                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
+                                              r.check_liberado_parcial
+                                                ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
+                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                            }`}
+                                            title="Clic para indicar / modificar Liberado Parcialmente"
+                                          >
+                                            ⚠️ Lib. Parcial {r.check_liberado_parcial && r.cantidad_liberada ? `(${r.cantidad_liberada})` : ''}
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => handleToggleReproCheck(r, 'check_espera_formato')}
+                                            disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
+                                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
+                                              r.check_espera_formato
+                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                            }`}
+                                            title="Clic para activar/desactivar A espera de Formato"
+                                          >
+                                            📋 A espera de Formato
+                                          </button>
+                                        </div>
+                                      </td>
                                       <td className="py-2 px-3 text-right">
                                         {currentRole === 'calidad' && (
                                           <div className="flex justify-end gap-1.5">
@@ -2808,7 +2995,18 @@ export default function TabPBO({
                               <div key={r.id} className="bg-slate-50 border border-slate-200/60 p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                                 <div>
                                   <span className="font-mono font-bold text-slate-800 text-sm block">{r.nuevo_ticket_reprocesado}</span>
-                                  <span className="text-[10px] text-slate-400 mt-0.5 block">NCA: {activeLote.defecto_general.substring(0, 30)}...</span>
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                    <span className="text-[10px] text-slate-400">NCA: {activeLote.defecto_general.substring(0, 30)}...</span>
+                                    {r.check_liberado && (
+                                      <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded text-[9px] font-extrabold">✅ Liberado</span>
+                                    )}
+                                    {r.check_liberado_parcial && (
+                                      <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[9px] font-extrabold">⚠️ Lib. Parcial {r.cantidad_liberada ? `(${r.cantidad_liberada})` : ''}</span>
+                                    )}
+                                    {r.check_espera_formato && (
+                                      <span className="bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded text-[9px] font-extrabold">📋 A espera de Formato</span>
+                                    )}
+                                  </div>
                                 </div>
 
                                 <div className="flex items-center gap-2">

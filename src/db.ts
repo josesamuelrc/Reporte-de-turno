@@ -142,18 +142,25 @@ export const getAnalistas = async (): Promise<string[]> => {
   return local.filter(a => a.activo).map(a => a.nombre).sort();
 };
 
-export const getPendientesActivos = async (): Promise<Pendiente[]> => {
+export const getPendientesActivos = async (reporteId?: number): Promise<Pendiente[]> => {
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase
-        .from('pendientes')
-        .select('*')
-        .eq('estado', 'Pendiente')
-        .order('id', { ascending: true });
+      let query = supabase.from('pendientes').select('*');
+      if (reporteId) {
+        query = query.or(`estado.eq.Pendiente,reporte_resolucion_id.eq.${reporteId}`);
+      } else {
+        query = query.eq('estado', 'Pendiente');
+      }
+      const { data, error } = await query.order('id', { ascending: true });
       
       if (error) throw error;
-      return data || [];
+      return (data || []).filter(p => {
+        if (p.estado === 'Realizado' && p.reporte_resolucion_id !== reporteId) {
+          return false;
+        }
+        return true;
+      });
     } catch (e) {
       console.error("Supabase error fetching active issues", e);
     }
@@ -161,7 +168,13 @@ export const getPendientesActivos = async (): Promise<Pendiente[]> => {
 
   // Fallback
   const pendientes: Pendiente[] = getLocalData('pendientes');
-  return pendientes.filter(p => p.estado === 'Pendiente');
+  return pendientes.filter(p => {
+    if (p.estado === 'Realizado' && p.reporte_resolucion_id !== reporteId) {
+      return false;
+    }
+    if (!reporteId && p.estado === 'Realizado') return false;
+    return p.estado === 'Pendiente' || p.reporte_resolucion_id === reporteId;
+  });
 };
 
 export const parseTrazabilidadesList = (list: Trazabilidad[]): Trazabilidad[] => {
@@ -187,18 +200,30 @@ export const parseTrazabilidadesList = (list: Trazabilidad[]): Trazabilidad[] =>
   });
 };
 
-export const getTrazabilidadActiva = async (): Promise<Trazabilidad[]> => {
+export const getTrazabilidadActiva = async (reporteId?: number): Promise<Trazabilidad[]> => {
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase
-        .from('trazabilidad')
-        .select('*')
-        .eq('estado', 'Pendiente')
-        .order('id', { ascending: true });
+      let query = supabase.from('trazabilidad').select('*');
+      if (reporteId) {
+        query = query.or(`estado.eq.Pendiente,reporte_resolucion_id.eq.${reporteId}`);
+      } else {
+        query = query.eq('estado', 'Pendiente');
+      }
+      const { data, error } = await query.order('id', { ascending: true });
       
       if (error) throw error;
-      return parseTrazabilidadesList(data || []);
+      const parsed = parseTrazabilidadesList(data || []);
+      return parsed.filter(t => {
+        const isBoth = Boolean(t.hacia_adelante && t.hacia_atras);
+        if (isBoth && t.estado !== 'Finalizada') {
+          t.estado = 'Finalizada';
+        }
+        if ((t.estado === 'Finalizada' || isBoth) && t.reporte_resolucion_id !== reporteId) {
+          return false;
+        }
+        return true;
+      });
     } catch (e) {
       console.error("Supabase error fetching active traceability", e);
     }
@@ -206,7 +231,18 @@ export const getTrazabilidadActiva = async (): Promise<Trazabilidad[]> => {
 
   // Fallback
   const list: Trazabilidad[] = getLocalData('trazabilidad');
-  return parseTrazabilidadesList(list.filter(t => t.estado === 'Pendiente'));
+  const parsed = parseTrazabilidadesList(list);
+  return parsed.filter(t => {
+    const isBoth = Boolean(t.hacia_adelante && t.hacia_atras);
+    if (isBoth && t.estado !== 'Finalizada') {
+      t.estado = 'Finalizada';
+    }
+    if ((t.estado === 'Finalizada' || isBoth) && t.reporte_resolucion_id !== reporteId) {
+      return false;
+    }
+    if (!reporteId && (t.estado === 'Finalizada' || isBoth)) return false;
+    return t.estado === 'Pendiente' || t.reporte_resolucion_id === reporteId;
+  });
 };
 
 export const getUltimoReporteBorrador = async (): Promise<ReporteCompleto | null> => {
@@ -243,10 +279,13 @@ export const getUltimoReporteBorrador = async (): Promise<ReporteCompleto | null
         supabase.from('observaciones_generales').select('*').eq('reporte_id', rId),
         supabase.from('identificacion_rociadoras').select('*').eq('reporte_id', rId),
         supabase.from('trazabilidad').select('*').eq('reporte_creacion_id', rId),
-        supabase.from('trazabilidad').select('id').eq('reporte_resolucion_id', rId),
+        supabase.from('trazabilidad').select('*').eq('reporte_resolucion_id', rId),
         supabase.from('pendientes').select('*').eq('reporte_creacion_id', rId),
-        supabase.from('pendientes').select('id').eq('reporte_resolucion_id', rId)
+        supabase.from('pendientes').select('*').eq('reporte_resolucion_id', rId)
       ]);
+
+      const trazResueltasFull = (trazabilidades_resueltas || []) as Trazabilidad[];
+      const pendResueltosFull = (pendientes_resueltos || []) as Pendiente[];
 
       return {
         reporte_id: rId,
@@ -257,9 +296,11 @@ export const getUltimoReporteBorrador = async (): Promise<ReporteCompleto | null
         generales: generales || [],
         rociadoras: rociadoras || [],
         trazabilidades_nuevas: parseTrazabilidadesList(trazabilidades_nuevas || []),
-        trazabilidades_resueltas: (trazabilidades_resueltas || []).map(r => r.id),
+        trazabilidades_resueltas: trazResueltasFull.map(r => r.id!),
+        trazabilidades_resueltas_objetos: parseTrazabilidadesList(trazResueltasFull),
         pendientes_nuevos: pendientes_nuevos || [],
-        pendientes_resueltos: (pendientes_resueltos || []).map(r => r.id)
+        pendientes_resueltos: pendResueltosFull.map(r => r.id!),
+        pendientes_resueltos_objetos: pendResueltosFull
       };
     } catch (e) {
       console.error("Supabase error fetching borrador, using local fallback", e);
@@ -279,14 +320,12 @@ export const getUltimoReporteBorrador = async (): Promise<ReporteCompleto | null
   const rociadoras: IdentificacionRociadoras[] = getLocalData('identificacion_rociadoras').filter((p: any) => p.reporte_id === rId);
   
   const trazabilidades_nuevas: Trazabilidad[] = getLocalData('trazabilidad').filter((p: any) => p.reporte_creacion_id === rId);
-  const trazabilidades_resueltas: number[] = getLocalData('trazabilidad')
-    .filter((p: any) => p.reporte_resolucion_id === rId)
-    .map((p: any) => p.id);
+  const trazResueltasFull: Trazabilidad[] = getLocalData('trazabilidad').filter((p: any) => p.reporte_resolucion_id === rId);
+  const trazabilidades_resueltas: number[] = trazResueltasFull.map((p: any) => p.id);
 
   const pendientes_nuevos: Pendiente[] = getLocalData('pendientes').filter((p: any) => p.reporte_creacion_id === rId);
-  const pendientes_resueltos: number[] = getLocalData('pendientes')
-    .filter((p: any) => p.reporte_resolucion_id === rId)
-    .map((p: any) => p.id);
+  const pendResueltosFull: Pendiente[] = getLocalData('pendientes').filter((p: any) => p.reporte_resolucion_id === rId);
+  const pendientes_resueltos: number[] = pendResueltosFull.map((p: any) => p.id);
 
   return {
     reporte_id: rId,
@@ -298,8 +337,10 @@ export const getUltimoReporteBorrador = async (): Promise<ReporteCompleto | null
     rociadoras,
     trazabilidades_nuevas: parseTrazabilidadesList(trazabilidades_nuevas),
     trazabilidades_resueltas,
+    trazabilidades_resueltas_objetos: parseTrazabilidadesList(trazResueltasFull),
     pendientes_nuevos,
-    pendientes_resueltos
+    pendientes_resueltos,
+    pendientes_resueltos_objetos: pendResueltosFull
   };
 };
 
@@ -366,6 +407,21 @@ export const guardarReporteCompleto = async (
     pendientes_nuevos,
     pendientes_resueltos
   } = reporteCompleto;
+
+  const resolvedTrazIds = new Set<number>(trazabilidades_resueltas || []);
+  if (trazabilidades_activas_modificadas) {
+    trazabilidades_activas_modificadas.forEach(traz => {
+      if (traz.id) {
+        if (traz.hacia_adelante && traz.hacia_atras) {
+          resolvedTrazIds.add(traz.id);
+        } else {
+          resolvedTrazIds.delete(traz.id);
+        }
+      }
+    });
+  }
+
+  const resolvedPendIds = new Set<number>(pendientes_resueltos || []);
 
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -519,20 +575,26 @@ export const guardarReporteCompleto = async (
       if (trazabilidades_nuevas.length > 0) {
         insertPromises.push(
           supabase.from('trazabilidad').insert(
-            trazabilidades_nuevas.map(t => ({
-              tipo: t.tipo,
-              codigo_sap: t.codigo_sap,
-              descripcion: t.descripcion,
-              orden: t.orden,
-              lote: t.lote,
-              defecto: t.defecto,
-              ticket: t.ticket || (t.tickets_inspeccionados && t.tickets_retenidos ? `Insp: ${t.tickets_inspeccionados} | Ret: ${t.tickets_retenidos}` : t.tickets_inspeccionados || t.tickets_retenidos || ''),
-              tickets_inspeccionados: t.tickets_inspeccionados || null,
-              tickets_retenidos: t.tickets_retenidos || null,
-              estado: 'Pendiente',
-              obs: t.obs,
-              reporte_creacion_id: activeId
-            }))
+            trazabilidades_nuevas.map(t => {
+              const isResolved = Boolean(t.hacia_adelante && t.hacia_atras);
+              return {
+                tipo: t.tipo,
+                codigo_sap: t.codigo_sap,
+                descripcion: t.descripcion,
+                orden: t.orden,
+                lote: t.lote,
+                defecto: t.defecto,
+                ticket: t.ticket || (t.tickets_inspeccionados && t.tickets_retenidos ? `Insp: ${t.tickets_inspeccionados} | Ret: ${t.tickets_retenidos}` : t.tickets_inspeccionados || t.tickets_retenidos || ''),
+                tickets_inspeccionados: t.tickets_inspeccionados || null,
+                tickets_retenidos: t.tickets_retenidos || null,
+                estado: isResolved ? 'Finalizada' : 'Pendiente',
+                obs: t.obs,
+                hacia_adelante: t.hacia_adelante ?? false,
+                hacia_atras: t.hacia_atras ?? false,
+                reporte_creacion_id: activeId,
+                reporte_resolucion_id: isResolved ? activeId : null
+              };
+            })
           ) as any
         );
       }
@@ -540,21 +602,26 @@ export const guardarReporteCompleto = async (
       if (pendientes_nuevos.length > 0) {
         insertPromises.push(
           supabase.from('pendientes').insert(
-            pendientes_nuevos.map(p => ({
-              descripcion: p.descripcion,
-              responsable: p.responsable,
-              observaciones: p.observaciones,
-              estado: 'Pendiente',
-              reporte_creacion_id: activeId
-            }))
+            pendientes_nuevos.map(p => {
+              const isDone = p.estado === 'Realizado';
+              return {
+                descripcion: p.descripcion,
+                responsable: p.responsable,
+                observaciones: p.observaciones,
+                estado: isDone ? 'Realizado' : 'Pendiente',
+                reporte_creacion_id: activeId,
+                reporte_resolucion_id: isDone ? activeId : null
+              };
+            })
           ) as any
         );
       }
 
-      // 3. Resolver Trazabilidades y Pendientes
+      // 3. Resolver y Desmarcar Trazabilidades y Pendientes
       if (trazabilidades_activas_modificadas && trazabilidades_activas_modificadas.length > 0) {
         trazabilidades_activas_modificadas.forEach(traz => {
           if (traz.id) {
+            const isResolved = Boolean(traz.hacia_adelante && traz.hacia_atras);
             insertPromises.push(
               supabase
                 .from('trazabilidad')
@@ -563,7 +630,9 @@ export const guardarReporteCompleto = async (
                   tickets_retenidos: traz.tickets_retenidos,
                   obs: traz.obs,
                   hacia_adelante: traz.hacia_adelante,
-                  hacia_atras: traz.hacia_atras
+                  hacia_atras: traz.hacia_atras,
+                  estado: isResolved ? 'Finalizada' : 'Pendiente',
+                  reporte_resolucion_id: isResolved ? activeId : null
                 })
                 .eq('id', traz.id) as any
             );
@@ -571,21 +640,53 @@ export const guardarReporteCompleto = async (
         });
       }
 
-      if (trazabilidades_resueltas.length > 0) {
+      // Sync trazabilidad resolution states in Supabase
+      if (resolvedTrazIds.size > 0) {
+        const idsArray = Array.from(resolvedTrazIds);
         insertPromises.push(
           supabase
             .from('trazabilidad')
             .update({ estado: 'Finalizada', reporte_resolucion_id: activeId })
-            .in('id', trazabilidades_resueltas) as any
+            .in('id', idsArray) as any
+        );
+        insertPromises.push(
+          supabase
+            .from('trazabilidad')
+            .update({ estado: 'Pendiente', reporte_resolucion_id: null })
+            .eq('reporte_resolucion_id', activeId)
+            .not('id', 'in', `(${idsArray.join(',')})`) as any
+        );
+      } else {
+        insertPromises.push(
+          supabase
+            .from('trazabilidad')
+            .update({ estado: 'Pendiente', reporte_resolucion_id: null })
+            .eq('reporte_resolucion_id', activeId) as any
         );
       }
 
-      if (pendientes_resueltos.length > 0) {
+      // Sync pendientes resolution states in Supabase
+      if (resolvedPendIds.size > 0) {
+        const idsArray = Array.from(resolvedPendIds);
         insertPromises.push(
           supabase
             .from('pendientes')
             .update({ estado: 'Realizado', reporte_resolucion_id: activeId })
-            .in('id', pendientes_resueltos) as any
+            .in('id', idsArray) as any
+        );
+        insertPromises.push(
+          supabase
+            .from('pendientes')
+            .update({ estado: 'Pendiente', reporte_resolucion_id: null })
+            .eq('reporte_resolucion_id', activeId)
+            .not('id', 'in', `(${idsArray.join(',')})`) as any
+        );
+      } else {
+        insertPromises.push(
+          supabase
+            .from('pendientes')
+            .update({ estado: 'Pendiente', reporte_resolucion_id: null })
+            .eq('reporte_resolucion_id', activeId) as any
         );
       }
 
@@ -688,52 +789,63 @@ export const guardarReporteCompleto = async (
 
   // Trace nuevas
   const localTraz: Trazabilidad[] = getLocalData('trazabilidad');
-  trazabilidades_nuevas.forEach(t => localTraz.push({
-    ...t,
-    id: Math.floor(Math.random() * 1000000),
-    estado: 'Pendiente',
-    reporte_creacion_id: activeId
-  }));
+  trazabilidades_nuevas.forEach(t => {
+    const isResolved = Boolean(t.hacia_adelante && t.hacia_atras);
+    localTraz.push({
+      ...t,
+      id: Math.floor(Math.random() * 1000000),
+      estado: isResolved ? 'Finalizada' : 'Pendiente',
+      reporte_creacion_id: activeId,
+      reporte_resolucion_id: isResolved ? activeId : null
+    });
+  });
   
   // Trace modificadas
   if (trazabilidades_activas_modificadas) {
     trazabilidades_activas_modificadas.forEach(traz => {
       const idx = localTraz.findIndex(t => t.id === traz.id);
       if (idx !== -1) {
+        const isResolved = Boolean(traz.hacia_adelante && traz.hacia_atras);
         localTraz[idx].tickets_inspeccionados = traz.tickets_inspeccionados;
         localTraz[idx].tickets_retenidos = traz.tickets_retenidos;
         localTraz[idx].obs = traz.obs;
         localTraz[idx].hacia_adelante = traz.hacia_adelante;
         localTraz[idx].hacia_atras = traz.hacia_atras;
+        localTraz[idx].estado = isResolved ? 'Finalizada' : 'Pendiente';
+        localTraz[idx].reporte_resolucion_id = isResolved ? activeId : null;
       }
     });
   }
 
-  // Trace resueltas
-  trazabilidades_resueltas.forEach(id => {
-    const idx = localTraz.findIndex(t => t.id === id);
-    if (idx !== -1) {
-      localTraz[idx].estado = 'Finalizada';
-      localTraz[idx].reporte_resolucion_id = activeId;
+  // Trace resueltas / desmarcadas sync
+  localTraz.forEach((t, idx) => {
+    if (t.id && (t.reporte_resolucion_id === activeId || resolvedTrazIds.has(t.id))) {
+      const isResolved = resolvedTrazIds.has(t.id);
+      localTraz[idx].estado = isResolved ? 'Finalizada' : 'Pendiente';
+      localTraz[idx].reporte_resolucion_id = isResolved ? activeId : null;
     }
   });
   setLocalData('trazabilidad', localTraz);
 
   // Pendientes nuevos
   const localPend: Pendiente[] = getLocalData('pendientes');
-  pendientes_nuevos.forEach(p => localPend.push({
-    ...p,
-    id: Math.floor(Math.random() * 1000000),
-    estado: 'Pendiente',
-    reporte_creacion_id: activeId
-  }));
+  pendientes_nuevos.forEach(p => {
+    const isDone = p.estado === 'Realizado';
+    localPend.push({
+      ...p,
+      id: Math.floor(Math.random() * 1000000),
+      estado: isDone ? 'Realizado' : 'Pendiente',
+      reporte_creacion_id: activeId,
+      reporte_resolucion_id: isDone ? activeId : null
+    });
+  });
 
-  // Pendientes resueltos
-  pendientes_resueltos.forEach(id => {
-    const idx = localPend.findIndex(p => p.id === id);
-    if (idx !== -1) {
-      localPend[idx].estado = 'Realizado';
-      localPend[idx].reporte_resolucion_id = activeId;
+  // Pendientes resueltos / desmarcados sync
+  localPend.forEach((p, idx) => {
+    if (p.id && (p.reporte_resolucion_id === activeId || resolvedPendIds.has(p.id))) {
+      const isDone = resolvedPendIds.has(p.id);
+      localPend[idx].estado = isDone ? 'Realizado' : 'Pendiente';
+      localPend[idx].reporte_resolucion_id = isDone ? activeId : null;
     }
   });
   setLocalData('pendientes', localPend);
@@ -794,10 +906,13 @@ export const getReportePorId = async (id: number): Promise<ReporteCompleto | nul
         supabase.from('observaciones_generales').select('*').eq('reporte_id', id),
         supabase.from('identificacion_rociadoras').select('*').eq('reporte_id', id),
         supabase.from('trazabilidad').select('*').eq('reporte_creacion_id', id),
-        supabase.from('trazabilidad').select('id').eq('reporte_resolucion_id', id),
+        supabase.from('trazabilidad').select('*').eq('reporte_resolucion_id', id),
         supabase.from('pendientes').select('*').eq('reporte_creacion_id', id),
-        supabase.from('pendientes').select('id').eq('reporte_resolucion_id', id)
+        supabase.from('pendientes').select('*').eq('reporte_resolucion_id', id)
       ]);
+
+      const trazResueltasFull = (trazabilidades_resueltas || []) as Trazabilidad[];
+      const pendResueltosFull = (pendientes_resueltos || []) as Pendiente[];
 
       return {
         reporte_id: id,
@@ -808,9 +923,11 @@ export const getReportePorId = async (id: number): Promise<ReporteCompleto | nul
         generales: generales || [],
         rociadoras: rociadoras || [],
         trazabilidades_nuevas: parseTrazabilidadesList(trazabilidades_nuevas || []),
-        trazabilidades_resueltas: (trazabilidades_resueltas || []).map(r => r.id),
+        trazabilidades_resueltas: trazResueltasFull.map(r => r.id!),
+        trazabilidades_resueltas_objetos: parseTrazabilidadesList(trazResueltasFull),
         pendientes_nuevos: pendientes_nuevos || [],
-        pendientes_resueltos: (pendientes_resueltos || []).map(r => r.id)
+        pendientes_resueltos: pendResueltosFull.map(r => r.id!),
+        pendientes_resueltos_objetos: pendResueltosFull
       };
     } catch (e) {
       console.error("Supabase error fetching report details", e);
@@ -829,14 +946,12 @@ export const getReportePorId = async (id: number): Promise<ReporteCompleto | nul
   const rociadoras: IdentificacionRociadoras[] = getLocalData('identificacion_rociadoras').filter((p: any) => p.reporte_id === id);
   
   const trazabilidades_nuevas: Trazabilidad[] = getLocalData('trazabilidad').filter((p: any) => p.reporte_creacion_id === id);
-  const trazabilidades_resueltas: number[] = getLocalData('trazabilidad')
-    .filter((p: any) => p.reporte_resolucion_id === id)
-    .map((p: any) => p.id);
+  const trazResueltasFull: Trazabilidad[] = getLocalData('trazabilidad').filter((p: any) => p.reporte_resolucion_id === id);
+  const trazabilidades_resueltas: number[] = trazResueltasFull.map((p: any) => p.id);
 
   const pendientes_nuevos: Pendiente[] = getLocalData('pendientes').filter((p: any) => p.reporte_creacion_id === id);
-  const pendientes_resueltos: number[] = getLocalData('pendientes')
-    .filter((p: any) => p.reporte_resolucion_id === id)
-    .map((p: any) => p.id);
+  const pendResueltosFull: Pendiente[] = getLocalData('pendientes').filter((p: any) => p.reporte_resolucion_id === id);
+  const pendientes_resueltos: number[] = pendResueltosFull.map((p: any) => p.id);
 
   return {
     reporte_id: id,
@@ -848,8 +963,10 @@ export const getReportePorId = async (id: number): Promise<ReporteCompleto | nul
     rociadoras,
     trazabilidades_nuevas: parseTrazabilidadesList(trazabilidades_nuevas),
     trazabilidades_resueltas,
+    trazabilidades_resueltas_objetos: parseTrazabilidadesList(trazResueltasFull),
     pendientes_nuevos,
-    pendientes_resueltos
+    pendientes_resueltos,
+    pendientes_resueltos_objetos: pendResueltosFull
   };
 };
 
@@ -1085,7 +1202,13 @@ ALTER TABLE pbo_lotes DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pbo_paletas DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pbo_reprocesos DISABLE ROW LEVEL SECURITY;
 
--- Recargar la caché del esquema de Supabase para que la API reconozca las nuevas tablas
+-- Asegurar columnas para herencia y resolucion en bases de datos existentes
+ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS reporte_resolucion_id INTEGER REFERENCES reporte_turno(id) ON DELETE SET NULL;
+ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS hacia_adelante BOOLEAN DEFAULT FALSE;
+ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS hacia_atras BOOLEAN DEFAULT FALSE;
+ALTER TABLE pendientes ADD COLUMN IF NOT EXISTS reporte_resolucion_id INTEGER REFERENCES reporte_turno(id) ON DELETE SET NULL;
+
+-- Recargar la caché del esquema de Supabase para que la API reconozca las nuevas tablas y columnas
 NOTIFY pgrst, 'reload schema';
 `;
 };

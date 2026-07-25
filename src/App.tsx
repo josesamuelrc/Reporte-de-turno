@@ -127,9 +127,11 @@ export default function App() {
   const [rociadoras, setRociadoras] = useState<IdentificacionRociadoras[]>([]);
   const [trazabilidadesNuevas, setTrazabilidadesNuevas] = useState<Trazabilidad[]>([]);
   const [trazabilidadesResueltas, setTrazabilidadesResueltas] = useState<number[]>([]);
+  const [trazabilidadesResueltasObjetos, setTrazabilidadesResueltasObjetos] = useState<Trazabilidad[]>([]);
   const [trazabilidadesHeredadasModificadas, setTrazabilidadesHeredadasModificadas] = useState<Trazabilidad[]>([]);
   const [pendientesNuevos, setPendientesNuevos] = useState<Pendiente[]>([]);
   const [pendientesResueltos, setPendientesResueltos] = useState<number[]>([]);
+  const [pendientesResueltosObjetos, setPendientesResueltosObjetos] = useState<Pendiente[]>([]);
 
   // Trigger to update trace/issues lists
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -217,8 +219,10 @@ export default function App() {
     setRociadoras(payload.rociadoras);
     setTrazabilidadesNuevas(payload.trazabilidades_nuevas);
     setTrazabilidadesResueltas(payload.trazabilidades_resueltas);
+    setTrazabilidadesResueltasObjetos(payload.trazabilidades_resueltas_objetos || []);
     setPendientesNuevos(payload.pendientes_nuevos || []);
     setPendientesResueltos(payload.pendientes_resueltos);
+    setPendientesResueltosObjetos(payload.pendientes_resueltos_objetos || []);
     setEditable(payload.cabecera.estado === 'Borrador');
     
     // Force lists to update
@@ -246,8 +250,10 @@ export default function App() {
     setRociadoras([]);
     setTrazabilidadesNuevas([]);
     setTrazabilidadesResueltas([]);
+    setTrazabilidadesResueltasObjetos([]);
     setPendientesNuevos([]);
     setPendientesResueltos([]);
+    setPendientesResueltosObjetos([]);
     setEditable(true);
 
     // Refresh trace and issue lists
@@ -321,9 +327,11 @@ export default function App() {
       rociadoras,
       trazabilidades_nuevas: trazabilidadesNuevas,
       trazabilidades_resueltas: trazabilidadesResueltas,
+      trazabilidades_resueltas_objetos: trazabilidadesResueltasObjetos.filter(t => Boolean(t.hacia_adelante && t.hacia_atras)),
       trazabilidades_activas_modificadas: trazabilidadesHeredadasModificadas,
       pendientes_nuevos: pendientesNuevos,
-      pendientes_resueltos: pendientesResueltos
+      pendientes_resueltos: pendientesResueltos,
+      pendientes_resueltos_objetos: pendientesResueltosObjetos.filter(p => p.id && pendientesResueltos.includes(p.id))
     };
   };
 
@@ -671,16 +679,21 @@ export default function App() {
 
                 {activeTab === 'seguimiento' && (
                   <TabSeguimiento
+                    reporteId={reporteId}
                     trazabilidadesNuevas={trazabilidadesNuevas}
                     onChangeTrazabilidadesNuevas={setTrazabilidadesNuevas}
                     trazabilidadesResueltas={trazabilidadesResueltas}
                     onChangeTrazabilidadesResueltas={setTrazabilidadesResueltas}
+                    trazabilidadesResueltasObjetos={trazabilidadesResueltasObjetos}
+                    onChangeTrazabilidadesResueltasObjetos={setTrazabilidadesResueltasObjetos}
                     trazabilidadesHeredadasModificadas={trazabilidadesHeredadasModificadas}
                     onChangeTrazabilidadesHeredadasModificadas={setTrazabilidadesHeredadasModificadas}
                     pendientesNuevos={pendientesNuevos}
                     onChangePendientesNuevos={setPendientesNuevos}
                     pendientesResueltos={pendientesResueltos}
                     onChangePendientesResueltos={setPendientesResueltos}
+                    pendientesResueltosObjetos={pendientesResueltosObjetos}
+                    onChangePendientesResueltosObjetos={setPendientesResueltosObjetos}
                     editable={editable}
                     refreshTrigger={refreshTrigger}
                   />

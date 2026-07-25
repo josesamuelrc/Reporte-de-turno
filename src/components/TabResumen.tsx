@@ -90,7 +90,7 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     text += `📅 *Fecha:* ${formattedDate}\n`;
     text += `👥 *Grupo:* ${cabecera.grupo} | ⏰ *Turno:* T${cabecera.turno}\n`;
     text += `👤 *Analista:* ${cabecera.analista || 'No asignado'}\n`;
-    text += `⭐ *Start Quality:* ${cabecera.temp_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
+    text += `⭐ *Star Quality:* ${cabecera.temp_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
     text += `🎛️ *Equipos de Medición:* ${cabecera.hum_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
     if (cabecera.caida_tension) {
       text += `⚡ *Caídas de Tensión:* ${cabecera.caida_tension}\n`;
@@ -106,9 +106,6 @@ export default function TabResumen({ reporte }: TabResumenProps) {
       productos.forEach(p => {
         text += `• SAP: *${p.codigo_sap}* - ${p.descripcion}\n`;
         text += `  - *Orden:* ${p.orden || '—'} | *Lote:* ${p.lote} | *Paletas:* ${p.paletas || '—'} | *Camadas:* ${p.camadas || '—'}\n`;
-        if (p.obs) {
-          text += `  - _Obs:_ ${p.obs}\n`;
-        }
       });
     } else {
       text += `• Sin productos registrados en este turno.\n`;
@@ -143,8 +140,8 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     if (desviaciones.length > 0) {
       text += `⚠️ *Total:* ${desviaciones.length} desv. menores:\n`;
       desviaciones.forEach(d => {
-        text += `• *[${d.hora}]* - Lugar: ${d.tipo || 'No especificado'}\n`;
-        text += `  - *Defecto:* _${d.defecto}_ | *Paletas Afectadas:* ${d.paletas_afectadas}\n`;
+        text += `• *SAP:* ${d.codigo_sap || '—'} | ${d.descripcion || 'Sin desc.'}\n`;
+        text += `  - *Lote:* ${d.lote || '—'} | *Defecto:* _${d.defecto}_ | *Tickets Afectados:* ${d.paletas_afectadas || '0'}\n`;
         text += `  - *Pruebas Funcionales:* ${d.pruebas_funcionales}\n`;
         if (d.observaciones) {
           text += `  - _Obs:_ ${d.observaciones}\n`;
@@ -167,10 +164,22 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     text += `\n------------------------------------\n\n`;
 
     // --- TRAZABILIDAD ---
-    text += `🔍 *5. TRAZABILIDADES REALIZADAS EN EL TURNO*\n`;
-    if (trazabilidades_nuevas.length > 0) {
-      trazabilidades_nuevas.forEach(t => {
-        text += `• *[${t.tipo}]* SAP: ${t.codigo_sap} | Lote: ${t.lote}\n`;
+    text += `🔍 *5. TRAZABILIDADES DEL TURNO*\n`;
+    const trazResueltasObjetos = (reporte.trazabilidades_resueltas_objetos || []).filter(t => Boolean(t.hacia_adelante && t.hacia_atras));
+    const resueltasIds = new Set(trazResueltasObjetos.map(t => t.id).filter(Boolean));
+    const trazNuevasFiltradas = trazabilidades_nuevas.filter(t => !t.id || !resueltasIds.has(t.id));
+    const allTraz = [...trazNuevasFiltradas, ...trazResueltasObjetos];
+    if (allTraz.length > 0) {
+      allTraz.forEach(t => {
+        const isResolved = Boolean(t.hacia_adelante && t.hacia_atras);
+        const statusLabel = isResolved
+          ? '✅ Finalizada en este turno'
+          : t.hacia_adelante
+          ? '➡️ Hacia adelante'
+          : t.hacia_atras
+          ? '⬅️ Hacia atrás'
+          : '⏳ Pendiente';
+        text += `• *[${statusLabel}]* SAP: ${t.codigo_sap} | Lote: ${t.lote}\n`;
         text += `  - *Defecto:* _${t.defecto}_\n`;
         if (t.descripcion) {
           text += `  - *Detalle:* ${t.descripcion}\n`;
@@ -183,22 +192,29 @@ export default function TabResumen({ reporte }: TabResumenProps) {
         }
       });
     } else {
-      text += `• No hay trazabilidades registradas en el turno.\n`;
+      text += `• No hay trazabilidades registradas o procesadas en este turno.\n`;
     }
     text += `\n------------------------------------\n\n`;
 
     // --- PENDIENTES ---
-    text += `📌 *6. TAREAS Y PENDIENTES ENTREGADOS*\n`;
-    if (pendientes_nuevos.length > 0) {
-      pendientes_nuevos.forEach(p => {
-        text += `• *Pendiente:* ${p.descripcion}\n`;
-        text += `  - *Responsable:* ${p.responsable || 'No especificado'}\n`;
-        if (p.observaciones) {
-          text += `  - _Detalles:_ ${p.observaciones}\n`;
-        }
-      });
+    text += `📌 *6. TAREAS Y PENDIENTES*\n`;
+    const resueltosSet = new Set(reporte.pendientes_resueltos || []);
+    const pendResueltosObjetos = (reporte.pendientes_resueltos_objetos || []).filter(p => p.id && resueltosSet.has(p.id));
+    if (pendResueltosObjetos.length > 0 || pendientes_nuevos.length > 0) {
+      if (pendResueltosObjetos.length > 0) {
+        text += `*Realizados en este turno:*\n`;
+        pendResueltosObjetos.forEach(p => {
+          text += `• [✅ Realizado]: ${p.descripcion} (Resp: ${p.responsable || 'Atendido'})\n`;
+        });
+      }
+      if (pendientes_nuevos.length > 0) {
+        text += `*Entregados al sig. turno:*\n`;
+        pendientes_nuevos.forEach(p => {
+          text += `• [📌 Entregado]: ${p.descripcion} (Resp: ${p.responsable || 'No especificado'})\n`;
+        });
+      }
     } else {
-      text += `• No hay pendientes entregados al siguiente turno.\n`;
+      text += `• No hay pendientes procesados o entregados en este turno.\n`;
     }
     text += `\n------------------------------------\n\n`;
 
@@ -379,11 +395,10 @@ export default function TabResumen({ reporte }: TabResumenProps) {
 
         {/* METRICS & PARAMETERS CHECK */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {/* Start Quality Status */}
+          {/* Star Quality Status */}
           <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl flex items-center justify-between text-xs">
             <div>
-              <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Start Quality</span>
-              <span className="text-[10px] font-extrabold text-slate-500 leading-none mt-1 block">Arranque de Turno</span>
+              <span className="block text-xs font-bold text-slate-700 uppercase leading-none">Star Quality</span>
             </div>
             {cabecera.temp_cumple !== false ? (
               <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200">
@@ -399,8 +414,7 @@ export default function TabResumen({ reporte }: TabResumenProps) {
           {/* Equipos de Medición */}
           <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl flex items-center justify-between text-xs">
             <div>
-              <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Equipos de Medición</span>
-              <span className="text-[10px] font-extrabold text-slate-500 leading-none mt-1 block">Instrumentación</span>
+              <span className="block text-xs font-bold text-slate-700 uppercase leading-none">Equipos de Medición</span>
             </div>
             {cabecera.hum_cumple !== false ? (
               <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200">
@@ -422,7 +436,7 @@ export default function TabResumen({ reporte }: TabResumenProps) {
           </div>
         </div>
 
-        {/* Start Quality Obs */}
+        {/* Star Quality Obs */}
         {cabecera.observaciones_ambiente && (
           <div className={`border px-3 py-1.5 rounded-lg text-[10px] leading-relaxed ${
             cabecera.temp_cumple === false 
@@ -430,7 +444,7 @@ export default function TabResumen({ reporte }: TabResumenProps) {
               : 'bg-indigo-50/40 border-indigo-100 text-indigo-900'
           }`}>
             <span className="font-extrabold uppercase text-[9px] tracking-wider mr-1">
-              {cabecera.temp_cumple === false ? 'Observación de No Cumplimiento:' : 'Comentario de Arranque:'}
+              {cabecera.temp_cumple === false ? 'Observación de No Cumplimiento:' : 'Comentario de Star Quality:'}
             </span>
             {cabecera.observaciones_ambiente}
           </div>
@@ -499,7 +513,6 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                     <div>
                       <div className="font-bold text-slate-800">{p.descripcion}</div>
                       <div className="text-slate-500 font-medium text-[10px] mt-0.5">Orden: {p.orden || '—'}</div>
-                      {p.obs && <div className="text-slate-400 italic mt-1 text-[10px]">Obs: {p.obs}</div>}
                     </div>
                     <div className="flex justify-between items-center pt-1.5 border-t border-slate-200/60 text-[10px]">
                       <div>
@@ -518,13 +531,12 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                 <table className="w-full text-left border-collapse text-[11px]">
                   <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
                     <tr>
-                      <th className="py-1.5 px-2.5 w-[12%]">Código SAP</th>
-                      <th className="py-1.5 px-2.5 w-[33%]">Descripción del Producto</th>
-                      <th className="py-1.5 px-2.5 w-[15%]">Orden</th>
-                      <th className="py-1.5 px-2.5 w-[12%]">Lote</th>
-                      <th className="py-1.5 px-2.5 w-[10%]">Paletas</th>
-                      <th className="py-1.5 px-2.5 w-[10%]">Camadas</th>
-                      <th className="py-1.5 px-2.5 w-[8%]">Comentarios</th>
+                      <th className="py-1.5 px-2.5 w-[14%]">Código SAP</th>
+                      <th className="py-1.5 px-2.5 w-[40%]">Descripción del Producto</th>
+                      <th className="py-1.5 px-2.5 w-[16%]">Orden</th>
+                      <th className="py-1.5 px-2.5 w-[14%]">Lote</th>
+                      <th className="py-1.5 px-2.5 w-[8%]">Paletas</th>
+                      <th className="py-1.5 px-2.5 w-[8%]">Camadas</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-755">
@@ -536,7 +548,6 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                         <td className="py-1.5 px-2.5 font-semibold">{p.lote}</td>
                         <td className="py-1.5 px-2.5 font-semibold">{p.paletas || '0'}</td>
                         <td className="py-1.5 px-2.5 font-semibold">{p.camadas || '0'}</td>
-                        <td className="py-1.5 px-2.5 text-slate-400 italic">{p.obs || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -612,11 +623,8 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                 {desviaciones.map((d, idx) => (
                   <div key={idx} className="bg-amber-50/10 border border-amber-200/60 p-3 rounded-xl space-y-2 text-xs">
                     <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-slate-850 bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{d.hora}</span>
-                        <span className="font-mono font-bold text-slate-500 text-[10px]">{d.codigo_sap}</span>
-                      </div>
-                      <span className="font-bold text-amber-750 bg-amber-50 px-2 py-0.5 rounded text-[10px]">{d.paletas_afectadas} paleta(s)</span>
+                      <span className="font-mono font-bold text-slate-500 text-[10px]">{d.codigo_sap}</span>
+                      <span className="font-bold text-amber-750 bg-amber-50 px-2 py-0.5 rounded text-[10px]">{d.paletas_afectadas} ticket(s)</span>
                     </div>
                     <div>
                       <div className="font-bold text-slate-800">{d.descripcion}</div>
@@ -630,14 +638,10 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                         <span className="font-semibold text-slate-800">{d.lote || '—'}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 uppercase font-bold block">Lugar:</span>
-                        <span className="font-semibold text-slate-800">{d.tipo || '—'}</span>
-                      </div>
-                      <div>
                         <span className="text-slate-400 uppercase font-bold block">NCA:</span>
                         <span className="font-semibold text-slate-800">{d.nca}</span>
                       </div>
-                      <div>
+                      <div className="col-span-2">
                         <span className="text-slate-400 uppercase font-bold block">Observaciones:</span>
                         <span className="font-semibold text-slate-700 leading-normal">{d.observaciones || '—'}</span>
                       </div>
@@ -651,28 +655,24 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                 <table className="w-full text-left border-collapse text-[11px] min-w-[800px] lg:min-w-0 lg:w-full">
                   <thead className="bg-amber-50/20 text-amber-800 font-bold border-b border-amber-100">
                     <tr>
-                      <th className="py-1.5 px-2.5 w-[7%]">Hora</th>
-                      <th className="py-1.5 px-2.5 w-[8%]">Código SAP</th>
-                      <th className="py-1.5 px-2.5 w-[18%]">Descripción</th>
-                      <th className="py-1.5 px-2.5 w-[10%]">Lote</th>
-                      <th className="py-1.5 px-2.5 w-[10%]">Lugar</th>
-                      <th className="py-1.5 px-2.5 w-[12%]">Defecto</th>
-                      <th className="py-1.5 px-2.5 w-[6%]">NCA</th>
-                      <th className="py-1.5 px-2.5 w-[10%]">Paletas</th>
-                      <th className="py-1.5 px-2.5 w-[19%]">Observaciones</th>
+                      <th className="py-1.5 px-2.5 w-[11%]">Código SAP</th>
+                      <th className="py-1.5 px-2.5 w-[28%]">Descripción</th>
+                      <th className="py-1.5 px-2.5 w-[12%]">Lote</th>
+                      <th className="py-1.5 px-2.5 w-[18%]">Defecto</th>
+                      <th className="py-1.5 px-2.5 w-[7%]">NCA</th>
+                      <th className="py-1.5 px-2.5 w-[12%]">Tickets Afect.</th>
+                      <th className="py-1.5 px-2.5 w-[12%]">Observaciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-amber-50 text-slate-755">
                     {desviaciones.map((d, idx) => (
                       <tr key={idx} className="hover:bg-amber-50/5">
-                        <td className="py-1.5 px-2.5 font-bold">{d.hora}</td>
                         <td className="py-1.5 px-2.5 font-mono">{d.codigo_sap}</td>
                         <td className="py-1.5 px-2.5 font-semibold">{d.descripcion}</td>
                         <td className="py-1.5 px-2.5 font-medium">{d.lote || '—'}</td>
-                        <td className="py-1.5 px-2.5">{d.tipo || '—'}</td>
                         <td className="py-1.5 px-2.5 font-medium text-amber-700">{d.defecto}</td>
                         <td className="py-1.5 px-2.5">{d.nca}</td>
-                        <td className="py-1.5 px-2.5 font-bold">{d.paletas_afectadas} paleta(s)</td>
+                        <td className="py-1.5 px-2.5 font-bold">{d.paletas_afectadas} ticket(s)</td>
                         <td className="py-1.5 px-2.5 text-slate-500 whitespace-normal break-words">{d.observaciones}</td>
                       </tr>
                     ))}
@@ -700,133 +700,136 @@ export default function TabResumen({ reporte }: TabResumenProps) {
             </div>
           )}
 
-          {/* 5. Trazabilidades realizadas en el turno */}
-          {trazabilidades_nuevas.length > 0 && (
-            <div className="space-y-1.5">
-              <h3 className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
-                <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-600" />
-                5. Trazabilidades realizadas en el turno
-              </h3>
+          {/* 5. Trazabilidades del Turno (Nuevas y Procesadas) */}
+          {(() => {
+            const trazResueltas = (reporte.trazabilidades_resueltas_objetos || []).filter(t => Boolean(t.hacia_adelante && t.hacia_atras));
+            const resueltasIds = new Set(trazResueltas.map(t => t.id).filter(Boolean));
+            const trazNuevasFiltradas = trazabilidades_nuevas.filter(t => !t.id || !resueltasIds.has(t.id));
+            const allTraz = [...trazNuevasFiltradas, ...trazResueltas];
+            if (allTraz.length === 0) return null;
 
-              {/* MOBILE CARDS (Hidden in Print) */}
-              <div className="block md:hidden print:hidden space-y-2">
-                {trazabilidades_nuevas.map((t, idx) => (
-                  <div key={idx} className="bg-indigo-50/10 border border-indigo-200/60 p-3 rounded-xl space-y-2 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className={`px-1.5 py-0.5 rounded-sm text-[9px] font-bold ${t.tipo === 'Hacia adelante' ? 'bg-indigo-100 text-indigo-800' : 'bg-orange-100 text-orange-800'}`}>
-                        {t.tipo}
-                      </span>
-                      <span className="font-mono font-semibold text-slate-500 text-[10px]">Ticket: {t.ticket || 'S/N'}</span>
-                    </div>
-                    <div>
-                      <div className="font-bold text-slate-800">{t.defecto}</div>
-                      <div className="text-slate-500 mt-1 text-[10px]">{t.descripcion}</div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 border-t border-slate-200/60 text-[10px] text-slate-600">
-                      <div>
-                        <span className="text-slate-400 uppercase font-bold block">SAP / Lote:</span>
-                        <span className="font-mono font-bold text-slate-700">{t.codigo_sap}</span>
-                        <span className="block text-slate-400 text-[9px]">Lote: {t.lote}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 uppercase font-bold block">Instrucciones:</span>
-                        <span className="italic font-semibold text-slate-700 leading-normal">{t.obs || 'Proceder según protocolo'}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            return (
+              <div className="space-y-1.5">
+                <h3 className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
+                  <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-600" />
+                  5. Trazabilidades del Turno
+                </h3>
 
-              {/* DESKTOP/PRINT TABLE */}
-              <div className="hidden md:block print:block overflow-x-auto rounded-xl border border-indigo-200/60">
-                <table className="w-full text-left border-collapse text-[11px] min-w-[800px] lg:min-w-0 lg:w-full">
-                  <thead className="bg-indigo-50/20 text-indigo-800 font-bold border-b border-indigo-100">
-                    <tr>
-                      <th className="py-1.5 px-2.5 w-[15%]">Tipo</th>
-                      <th className="py-1.5 px-2.5 w-[15%]">SAP / Lote</th>
-                      <th className="py-1.5 px-2.5 w-[45%]">Descripción del Defecto / Trazado</th>
-                      <th className="py-1.5 px-2.5 w-[10%]">Ticket</th>
-                      <th className="py-1.5 px-2.5 w-[15%]">Instrucciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-indigo-50 text-slate-755">
-                    {trazabilidades_nuevas.map((t, idx) => (
-                      <tr key={idx} className="hover:bg-indigo-50/5">
-                        <td className="py-1.5 px-2.5">
-                          <span className={`px-1.5 py-0.5 rounded-sm text-[9px] font-bold ${t.tipo === 'Hacia adelante' ? 'bg-indigo-100 text-indigo-800' : 'bg-orange-100 text-orange-800'}`}>
-                            {t.tipo}
-                          </span>
-                        </td>
-                        <td className="py-1.5 px-2.5">
-                          <div className="font-bold">{t.codigo_sap}</div>
-                          <div className="text-slate-400 text-[9px]">Lote: {t.lote}</div>
-                        </td>
-                        <td className="py-1.5 px-2.5">
-                          <div className="font-semibold">{t.defecto}</div>
-                          <div className="text-slate-500 text-[10px] whitespace-normal break-words">{t.descripcion}</div>
-                        </td>
-                        <td className="py-1.5 px-2.5 font-mono">{t.ticket || 'S/N'}</td>
-                        <td className="py-1.5 px-2.5 italic text-slate-500 whitespace-normal break-words">{t.obs || 'Proceder según protocolo'}</td>
+                {/* DESKTOP/PRINT TABLE */}
+                <div className="overflow-x-auto rounded-xl border border-indigo-200/60">
+                  <table className="w-full text-left border-collapse text-[11px] min-w-[800px] lg:min-w-0 lg:w-full">
+                    <thead className="bg-indigo-50/20 text-indigo-800 font-bold border-b border-indigo-100">
+                      <tr>
+                        <th className="py-1.5 px-2.5 w-[18%]">Estado / Avance</th>
+                        <th className="py-1.5 px-2.5 w-[15%]">SAP / Lote</th>
+                        <th className="py-1.5 px-2.5 w-[42%]">Descripción del Defecto / Trazado</th>
+                        <th className="py-1.5 px-2.5 w-[10%]">Ticket</th>
+                        <th className="py-1.5 px-2.5 w-[15%]">Instrucciones</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-indigo-50 text-slate-755">
+                      {allTraz.map((t, idx) => {
+                        const isResolved = Boolean(t.hacia_adelante && t.hacia_atras);
+                        return (
+                          <tr key={idx} className={`hover:bg-indigo-50/5 ${isResolved ? 'bg-emerald-50/30' : ''}`}>
+                            <td className="py-1.5 px-2.5">
+                              {isResolved ? (
+                                <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  ✓ Finalizada en este turno
+                                </span>
+                              ) : t.hacia_adelante ? (
+                                <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-bold bg-indigo-100 text-indigo-800">
+                                  ➡️ Hacia adelante
+                                </span>
+                              ) : t.hacia_atras ? (
+                                <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-bold bg-orange-100 text-orange-800">
+                                  ⬅️ Hacia atrás
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-bold bg-slate-100 text-slate-700">
+                                  ⏳ Pendiente
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-1.5 px-2.5">
+                              <div className="font-bold text-slate-800">{t.codigo_sap}</div>
+                              <div className="text-slate-400 text-[9px]">Lote: {t.lote}</div>
+                            </td>
+                            <td className="py-1.5 px-2.5">
+                              <div className="font-semibold text-slate-800">{t.defecto}</div>
+                              <div className="text-slate-500 text-[10px] whitespace-normal break-words">{t.descripcion}</div>
+                            </td>
+                            <td className="py-1.5 px-2.5 font-mono">{t.ticket || 'S/N'}</td>
+                            <td className="py-1.5 px-2.5 italic text-slate-500 whitespace-normal break-words">{t.obs || 'Proceder según protocolo'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
-          {/* 6. Nuevos Pendientes */}
-          {pendientes_nuevos.length > 0 && (
-            <div className="space-y-1.5">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
-                <FileCheck className="w-3.5 h-3.5 text-emerald-600" />
-                6. Tareas / Pendientes Entregados
-              </h3>
+          {/* 6. Tareas y Pendientes del Turno */}
+          {(() => {
+            const resueltosSet = new Set(reporte.pendientes_resueltos || []);
+            const pendResueltos = (reporte.pendientes_resueltos_objetos || []).filter(p => p.id && resueltosSet.has(p.id));
+            const hasItems = pendResueltos.length > 0 || pendientes_nuevos.length > 0;
+            if (!hasItems) return null;
 
-              {/* MOBILE CARDS (Hidden in Print) */}
-              <div className="block md:hidden print:hidden space-y-2">
-                {pendientes_nuevos.map((p, idx) => (
-                  <div key={idx} className="bg-slate-50 border border-slate-150 p-3 rounded-xl space-y-2 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400 uppercase font-bold text-[9px]">Responsable Sugerido</span>
-                      <span className="font-extrabold text-slate-750 bg-slate-200 px-2 py-0.5 rounded text-[10px]">{p.responsable || 'Cualquiera'}</span>
-                    </div>
-                    <div>
-                      <div className="font-semibold text-slate-800">{p.descripcion}</div>
-                    </div>
-                    {p.observaciones && (
-                      <div className="pt-1.5 border-t border-slate-200/60 text-[10px]">
-                        <span className="text-slate-400 uppercase font-bold block">Detalles de Operación:</span>
-                        <span className="text-slate-500 block leading-normal">{p.observaciones}</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+            return (
+              <div className="space-y-1.5">
+                <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1 border-b pb-0.5">
+                  <FileCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  6. Tareas / Pendientes
+                </h3>
 
-              {/* DESKTOP/PRINT TABLE */}
-              <div className="hidden md:block print:block overflow-x-auto rounded-xl border border-slate-200">
-                <table className="w-full text-left border-collapse text-[11px]">
-                  <thead className="bg-slate-50 text-slate-650 font-bold border-b border-slate-200">
-                    <tr>
-                      <th className="py-1.5 px-2.5 w-[50%]">Descripción de la Tarea</th>
-                      <th className="py-1.5 px-2.5 w-[25%]">Responsable Sugerido</th>
-                      <th className="py-1.5 px-2.5 w-[25%]">Detalles de Operación</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-755">
-                    {pendientes_nuevos.map((p, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/30">
-                        <td className="py-1.5 px-2.5 font-semibold whitespace-normal break-words">{p.descripcion}</td>
-                        <td className="py-1.5 px-2.5 font-bold text-slate-600">{p.responsable || 'Cualquiera'}</td>
-                        <td className="py-1.5 px-2.5 text-slate-500 whitespace-normal break-words">{p.observaciones || '—'}</td>
+                {/* DESKTOP/PRINT TABLE */}
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-left border-collapse text-[11px]">
+                    <thead className="bg-slate-50 text-slate-650 font-bold border-b border-slate-200">
+                      <tr>
+                        <th className="py-1.5 px-2.5 w-[18%]">Estado</th>
+                        <th className="py-1.5 px-2.5 w-[42%]">Descripción de la Tarea</th>
+                        <th className="py-1.5 px-2.5 w-[20%]">Responsable</th>
+                        <th className="py-1.5 px-2.5 w-[20%]">Detalles de Operación</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-755">
+                      {/* Realizados en este turno */}
+                      {pendResueltos.map((p, idx) => (
+                        <tr key={`res-${idx}`} className="bg-emerald-50/30 hover:bg-emerald-50/50">
+                          <td className="py-1.5 px-2.5">
+                            <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              ✓ Realizado en este turno
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2.5 font-semibold text-slate-800 whitespace-normal break-words">{p.descripcion}</td>
+                          <td className="py-1.5 px-2.5 font-bold text-slate-600">{p.responsable || 'Atendido'}</td>
+                          <td className="py-1.5 px-2.5 text-slate-500 whitespace-normal break-words">{p.observaciones || '—'}</td>
+                        </tr>
+                      ))}
+
+                      {/* Entregados al siguiente turno */}
+                      {pendientes_nuevos.map((p, idx) => (
+                        <tr key={`new-${idx}`} className="hover:bg-slate-50/30">
+                          <td className="py-1.5 px-2.5">
+                            <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-bold bg-indigo-100 text-indigo-800">
+                              📌 Entregado al sig. turno
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2.5 font-semibold whitespace-normal break-words">{p.descripcion}</td>
+                          <td className="py-1.5 px-2.5 font-bold text-slate-600">{p.responsable || 'Cualquiera'}</td>
+                          <td className="py-1.5 px-2.5 text-slate-500 whitespace-normal break-words">{p.observaciones || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* 7. Reprocesos realizados durante el turno */}
           {matchingReprocesos.length > 0 && (

@@ -140,7 +140,7 @@ export default function TabCalidad({
                 <th className="py-3 px-4 w-[12%]">Lote</th>
                 <th className="py-3 px-4 w-[16%]">Defecto</th>
                 <th className="py-3 px-4 w-[8%]">NCA</th>
-                <th className="py-3 px-4 w-[11%]">Paletas Afect.</th>
+                <th className="py-3 px-4 w-[11%]">Tickets Afect.</th>
                 <th className="py-3 px-4 w-[11%]">Pruebas Func.</th>
                 <th className="py-3 px-4 w-[14%]">Observaciones</th>
                 {editable && <th className="py-3 px-4 w-[4%] text-center"></th>}
@@ -206,8 +206,8 @@ export default function TabCalidad({
                         disabled={!editable}
                         value={desv.paletas_afectadas}
                         onChange={(val) => updateDesvCell(idx, 'paletas_afectadas', val)}
-                        placeholder="Cant. paletas"
-                        label="Paletas Afectadas"
+                        placeholder="Cant. tickets"
+                        label="Tickets Afectados"
                       />
                     </td>
                     <td className="py-1 px-1.5">

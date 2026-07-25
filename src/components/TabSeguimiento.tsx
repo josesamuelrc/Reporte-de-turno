@@ -7,31 +7,41 @@ import ExpandableCell from './ExpandableCell';
 import { CATALOGO_PRODUCTOS_PBO } from './TabPBO';
 
 interface TabSeguimientoProps {
+  reporteId?: number;
   trazabilidadesNuevas: Trazabilidad[];
   onChangeTrazabilidadesNuevas: (traz: Trazabilidad[]) => void;
   trazabilidadesResueltas: number[]; // Array of trace IDs resolved in current report
   onChangeTrazabilidadesResueltas: (ids: number[]) => void;
+  trazabilidadesResueltasObjetos?: Trazabilidad[];
+  onChangeTrazabilidadesResueltasObjetos?: (traz: Trazabilidad[]) => void;
   trazabilidadesHeredadasModificadas?: Trazabilidad[];
   onChangeTrazabilidadesHeredadasModificadas?: (traz: Trazabilidad[]) => void;
   pendientesNuevos: Pendiente[];
   onChangePendientesNuevos: (pend: Pendiente[]) => void;
   pendientesResueltos: number[]; // Array of pending IDs resolved in current report
   onChangePendientesResueltos: (ids: number[]) => void;
+  pendientesResueltosObjetos?: Pendiente[];
+  onChangePendientesResueltosObjetos?: (pend: Pendiente[]) => void;
   editable: boolean;
   refreshTrigger?: number; // Trigger reload of DB active entries
 }
 
 export default function TabSeguimiento({
+  reporteId,
   trazabilidadesNuevas,
   onChangeTrazabilidadesNuevas,
   trazabilidadesResueltas,
   onChangeTrazabilidadesResueltas,
+  trazabilidadesResueltasObjetos = [],
+  onChangeTrazabilidadesResueltasObjetos,
   trazabilidadesHeredadasModificadas,
   onChangeTrazabilidadesHeredadasModificadas,
   pendientesNuevos,
   onChangePendientesNuevos,
   pendientesResueltos,
   onChangePendientesResueltos,
+  pendientesResueltosObjetos = [],
+  onChangePendientesResueltosObjetos,
   editable,
   refreshTrigger = 0
 }: TabSeguimientoProps) {
@@ -46,12 +56,26 @@ export default function TabSeguimiento({
       setLoading(true);
       try {
         const [activeTraz, activePend] = await Promise.all([
-          getTrazabilidadActiva(),
-          getPendientesActivos()
+          getTrazabilidadActiva(reporteId),
+          getPendientesActivos(reporteId)
         ]);
         if (active) {
           setDbTrazabilidades(activeTraz);
           setDbPendientes(activePend);
+
+          // Sync resolved objects if they match active loaded items
+          if (onChangeTrazabilidadesResueltasObjetos && trazabilidadesResueltas.length > 0) {
+            const matchedTraz = activeTraz.filter(t => t.id && trazabilidadesResueltas.includes(t.id));
+            if (matchedTraz.length > 0) {
+              onChangeTrazabilidadesResueltasObjetos(matchedTraz);
+            }
+          }
+          if (onChangePendientesResueltosObjetos && pendientesResueltos.length > 0) {
+            const matchedPend = activePend.filter(p => p.id && pendientesResueltos.includes(p.id));
+            if (matchedPend.length > 0) {
+              onChangePendientesResueltosObjetos(matchedPend);
+            }
+          }
         }
       } catch (err) {
         console.error("Error loading active handover items", err);
@@ -63,42 +87,59 @@ export default function TabSeguimiento({
     return () => {
       active = false;
     };
-  }, [refreshTrigger]);
+  }, [refreshTrigger, reporteId]);
 
   // Handle editing inherited trazabilidades
   const handleEditHeredada = (id: number, field: keyof Trazabilidad, value: any) => {
     if (!editable) return;
     
+    let updatedResolvedIds = [...trazabilidadesResueltas];
+    let updatedResolvedObjs = [...trazabilidadesResueltasObjetos];
+
     setDbTrazabilidades(prev => prev.map(t => {
       if (t.id === id) {
         const updated = { ...t, [field]: value };
         
         // Auto-resolve logic
-        const bothChecked = updated.hacia_adelante && updated.hacia_atras;
-        const currentlyResolved = trazabilidadesResueltas.includes(id);
+        const bothChecked = Boolean(updated.hacia_adelante && updated.hacia_atras);
+        updated.estado = bothChecked ? 'Finalizada' : 'Pendiente';
+        const currentlyResolved = updatedResolvedIds.includes(id);
         
         if (bothChecked && !currentlyResolved) {
-           onChangeTrazabilidadesResueltas([...trazabilidadesResueltas, id]);
+          updatedResolvedIds.push(id);
+          updatedResolvedObjs.push(updated);
         } else if (!bothChecked && currentlyResolved) {
-           onChangeTrazabilidadesResueltas(trazabilidadesResueltas.filter(rid => rid !== id));
+          updatedResolvedIds = updatedResolvedIds.filter(rid => rid !== id);
+          updatedResolvedObjs = updatedResolvedObjs.filter(o => o.id !== id);
+        } else if (bothChecked && currentlyResolved) {
+          const idx = updatedResolvedObjs.findIndex(o => o.id === id);
+          if (idx >= 0) updatedResolvedObjs[idx] = updated;
         }
         
         return updated;
       }
       return t;
     }));
+
+    onChangeTrazabilidadesResueltas(updatedResolvedIds);
+    if (onChangeTrazabilidadesResueltasObjetos) {
+      onChangeTrazabilidadesResueltasObjetos(updatedResolvedObjs);
+    }
     
     if (onChangeTrazabilidadesHeredadasModificadas && trazabilidadesHeredadasModificadas) {
       const existingIdx = trazabilidadesHeredadasModificadas.findIndex(t => t.id === id);
+      const original = dbTrazabilidades.find(t => t.id === id);
+      const baseItem = existingIdx >= 0 ? trazabilidadesHeredadasModificadas[existingIdx] : (original || {});
+      const updatedItem = { ...baseItem, [field]: value };
+      const bothChecked = Boolean(updatedItem.hacia_adelante && updatedItem.hacia_atras);
+      updatedItem.estado = bothChecked ? 'Finalizada' : 'Pendiente';
+
       if (existingIdx >= 0) {
         const updatedList = [...trazabilidadesHeredadasModificadas];
-        updatedList[existingIdx] = { ...updatedList[existingIdx], [field]: value };
+        updatedList[existingIdx] = updatedItem as Trazabilidad;
         onChangeTrazabilidadesHeredadasModificadas(updatedList);
       } else {
-        const original = dbTrazabilidades.find(t => t.id === id);
-        if (original) {
-          onChangeTrazabilidadesHeredadasModificadas([...trazabilidadesHeredadasModificadas, { ...original, [field]: value }]);
-        }
+        onChangeTrazabilidadesHeredadasModificadas([...trazabilidadesHeredadasModificadas, updatedItem as Trazabilidad]);
       }
     }
   };
@@ -106,10 +147,23 @@ export default function TabSeguimiento({
   // Handle checking/unchecking a pending item
   const togglePendienteResuelto = (id: number) => {
     if (!editable) return;
-    if (pendientesResueltos.includes(id)) {
-      onChangePendientesResueltos(pendientesResueltos.filter(x => x !== id));
+    let updatedResolvedIds = [...pendientesResueltos];
+    let updatedResolvedObjs = [...pendientesResueltosObjetos];
+
+    if (updatedResolvedIds.includes(id)) {
+      updatedResolvedIds = updatedResolvedIds.filter(x => x !== id);
+      updatedResolvedObjs = updatedResolvedObjs.filter(o => o.id !== id);
     } else {
-      onChangePendientesResueltos([...pendientesResueltos, id]);
+      updatedResolvedIds.push(id);
+      const targetItem = dbPendientes.find(p => p.id === id);
+      if (targetItem) {
+        updatedResolvedObjs.push(targetItem);
+      }
+    }
+
+    onChangePendientesResueltos(updatedResolvedIds);
+    if (onChangePendientesResueltosObjetos) {
+      onChangePendientesResueltosObjetos(updatedResolvedObjs);
     }
   };
 

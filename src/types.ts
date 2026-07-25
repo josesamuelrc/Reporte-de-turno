@@ -119,9 +119,11 @@ export interface ReporteCompleto {
   rociadoras: IdentificacionRociadoras[];
   trazabilidades_nuevas: Trazabilidad[];
   trazabilidades_resueltas: number[]; // ids of resolved active trazabilidades
+  trazabilidades_resueltas_objetos?: Trazabilidad[]; // full objects of traceabilities resolved in this report
   trazabilidades_activas_modificadas?: Trazabilidad[]; // modified inherited
   pendientes_nuevos: Pendiente[];
   pendientes_resueltos: number[]; // ids of resolved active pendientes
+  pendientes_resueltos_objetos?: Pendiente[]; // full objects of pendientes resolved in this report
 }
 
 export interface LotePBO {
@@ -164,6 +166,10 @@ export interface Reproceso {
   paletas_nuevas?: number;               // 0 si es paleta completa
   estatus_calidad: 'Chequeado por Calidad' | 'En Control de Calidad' | 'Aprobado' | 'Rechazado';
   estatus_logistica: 'En espera' | 'Confirmado' | 'Inconsistencia';
+  check_liberado?: boolean;
+  check_liberado_parcial?: boolean;
+  cantidad_liberada?: string;            // Cantidad liberada cuando es parcialmente liberado (Ej: 2 paletas, 1000 latas)
+  check_espera_formato?: boolean;
   usuario_registro: string;
   creado_el: string;
   fecha_registro?: string;
