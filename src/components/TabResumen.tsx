@@ -219,10 +219,23 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     text += `\n------------------------------------\n\n`;
 
     // --- REPROCESOS PBO ---
-    text += `🔄 *7. REPROCESOS REALIZADOS DURANTE EL TURNO*
-`;
+    text += `🔄 *7. REPROCESOS REALIZADOS DURANTE EL TURNO*\n`;
     if (matchingReprocesos.length > 0) {
-      const groupedRepros: Record<string, { material: string; defectoGeneral: string; lote: string; tickets: string[]; paletas: number; camadas: number; }> = {};
+      const groupedRepros: Record<string, { 
+        material: string; 
+        defectoGeneral: string; 
+        lote: string; 
+        items: {
+          ticket: string;
+          paletas: number;
+          camadas: number;
+          check_liberado: boolean;
+          check_espera_formato: boolean;
+          calidad: string;
+          observaciones: string;
+        }[];
+      }> = {};
+
       matchingReprocesos.forEach(r => {
         const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
         if (!pboInfo) return;
@@ -230,28 +243,38 @@ export default function TabResumen({ reporte }: TabResumenProps) {
         const defectoGeneral = pboInfo.defecto_general || 'N/D';
         const key = `${material}-${defectoGeneral}-${pboInfo.lote}`;
         if (!groupedRepros[key]) {
-          groupedRepros[key] = { material, defectoGeneral, lote: pboInfo.lote, tickets: [], paletas: 0, camadas: 0 };
+          groupedRepros[key] = { material, defectoGeneral, lote: pboInfo.lote, items: [] };
         }
-        if (r.nuevo_ticket_reprocesado && r.nuevo_ticket_reprocesado !== 'N/A') {
-           groupedRepros[key].tickets.push(r.nuevo_ticket_reprocesado);
-        }
-        groupedRepros[key].paletas += (r.paletas_nuevas !== undefined ? r.paletas_nuevas : 1);
-        if (r.camadas_sueltas > 0) {
-           groupedRepros[key].camadas += r.camadas_sueltas;
-        }
+        groupedRepros[key].items.push({
+          ticket: r.nuevo_ticket_reprocesado || 'N/A',
+          paletas: r.paletas_nuevas !== undefined ? r.paletas_nuevas : 0,
+          camadas: r.camadas_sueltas || 0,
+          check_liberado: !!r.check_liberado,
+          check_espera_formato: !!r.check_espera_formato,
+          calidad: r.calidad || 'Cumple',
+          observaciones: r.observaciones || ''
+        });
       });
       
       const groups = Object.values(groupedRepros);
       text += `⚠️ *Total:* ${groups.length} material(es) con reproceso(s):
 `;
       groups.forEach(group => {
-        const camadasDisplay = group.camadas % 1 === 0 ? group.camadas : Number(group.camadas.toFixed(2));
-        text += `• *Material:* ${group.material} | *Lote:* ${group.lote} | *Defecto General:* ${group.defectoGeneral}
+        text += `• *Material:* ${group.material} | *Lote:* ${group.lote} | *Defecto:* ${group.defectoGeneral}
 `;
-        text += `  - *Tickets Reprocesados:* ${group.tickets.join(', ') || 'N/A'}
+        group.items.forEach((item, index) => {
+          const statusParts: string[] = [];
+          if (item.check_liberado) statusParts.push('Liberado ✅');
+          if (item.check_espera_formato) statusParts.push('Espera de Formato 📋');
+          if (statusParts.length === 0) statusParts.push('Pendiente ⏳');
+          const statusText = statusParts.join(' / ');
+          
+          const camadasDisplay = item.camadas % 1 === 0 ? item.camadas : Number(item.camadas.toFixed(2));
+          const obsText = item.observaciones ? ` | *Obs:* ${item.observaciones}` : '';
+          
+          text += `  - *Reproceso ${index + 1}:* Tkt(s): ${item.ticket} | ${item.paletas} Pal, ${camadasDisplay} Cam | *Calidad:* ${item.calidad} | *Estatus:* ${statusText}${obsText}
 `;
-        text += `  - *Total Generado:* ${group.paletas} Paletas, ${camadasDisplay} Camadas
-`;
+        });
       });
     } else {
       text += `✅ No se registraron reprocesos de PBO en este turno.
@@ -843,65 +866,64 @@ export default function TabResumen({ reporte }: TabResumenProps) {
                 <table className="w-full text-left border-collapse text-[11px]">
                   <thead className="bg-indigo-50/50 text-indigo-800 font-bold border-b border-indigo-100">
                     <tr>
-                      <th className="py-1.5 px-2.5">Material</th>
+                      <th className="py-1.5 px-2.5">Material (Lote)</th>
                       <th className="py-1.5 px-2.5">Defecto General</th>
-                      <th className="py-1.5 px-2.5">Lote</th>
-                      <th className="py-1.5 px-2.5">Tickets Reprocesados (Nuevos)</th>
-                      <th className="py-1.5 px-2.5">Total Generado</th>
+                      <th className="py-1.5 px-2.5">Tickets Generados</th>
+                      <th className="py-1.5 px-2.5">Cantidad</th>
+                      <th className="py-1.5 px-2.5">Estatus</th>
+                      <th className="py-1.5 px-2.5">Calidad</th>
+                      <th className="py-1.5 px-2.5">Obs.</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {(() => {
-                      // Group by PBO (which gives us Material, Defecto General, Lote)
-                      const groupedRepros: Record<string, {
-                        material: string;
-                        defectoGeneral: string;
-                        lote: string;
-                        tickets: string[];
-                        paletas: number;
-                        camadas: number;
-                      }> = {};
+                    {matchingReprocesos.map((r, idx) => {
+                      const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
+                      const material = pboInfo ? pboInfo.producto : 'N/D';
+                      const defectoGeneral = pboInfo ? pboInfo.defecto_general : 'N/D';
+                      const lote = pboInfo ? pboInfo.lote : 'N/D';
+                      
+                      const statusParts: string[] = [];
+                      if (r.check_liberado) statusParts.push('Liberado ✅');
+                      if (r.check_espera_formato) statusParts.push('Espera Formato 📋');
+                      if (statusParts.length === 0) statusParts.push('Pendiente ⏳');
+                      const statusText = statusParts.join(' / ');
 
-                      matchingReprocesos.forEach(r => {
-                        const pboInfo = pboLotes.find(l => l.id_pbo === r.id_pbo);
-                        if (!pboInfo) return;
-                        
-                        const material = pboInfo.producto || 'N/D';
-                        const defectoGeneral = pboInfo.defecto_general || 'N/D';
-                        const key = `${material}-${defectoGeneral}-${pboInfo.lote}`;
-
-                        if (!groupedRepros[key]) {
-                          groupedRepros[key] = {
-                            material,
-                            defectoGeneral,
-                            lote: pboInfo.lote,
-                            tickets: [],
-                            paletas: 0,
-                            camadas: 0
-                          };
-                        }
-
-                        if (r.nuevo_ticket_reprocesado && r.nuevo_ticket_reprocesado !== 'N/A') {
-                           groupedRepros[key].tickets.push(r.nuevo_ticket_reprocesado);
-                        }
-                        groupedRepros[key].paletas += (r.paletas_nuevas !== undefined ? r.paletas_nuevas : 1);
-                        if (r.camadas_sueltas > 0) {
-                           groupedRepros[key].camadas += r.camadas_sueltas;
-                        }
-                      });
-
-                      return Object.values(groupedRepros).map((group, idx) => (
-                        <tr key={idx} className="hover:bg-indigo-50/20">
-                          <td className="py-1.5 px-2.5 font-bold">{group.material}</td>
-                          <td className="py-1.5 px-2.5 text-slate-600 font-medium">{group.defectoGeneral}</td>
-                          <td className="py-1.5 px-2.5 font-mono">{group.lote}</td>
-                          <td className="py-1.5 px-2.5 font-mono text-indigo-700 font-semibold">{group.tickets.join(', ') || 'N/A'}</td>
+                      return (
+                        <tr key={idx} className="hover:bg-indigo-50/20 text-slate-700">
+                          <td className="py-1.5 px-2.5 font-bold">
+                            {material} <span className="text-slate-400 text-[10px] font-normal font-mono">({lote})</span>
+                          </td>
+                          <td className="py-1.5 px-2.5 text-slate-500 font-medium">{defectoGeneral}</td>
+                          <td className="py-1.5 px-2.5 font-mono text-indigo-700 font-semibold">{r.nuevo_ticket_reprocesado || 'N/A'}</td>
                           <td className="py-1.5 px-2.5 font-semibold text-slate-800">
-                            {group.paletas} Paletas, {group.camadas % 1 === 0 ? group.camadas : Number(group.camadas.toFixed(2))} Camadas
+                            {r.paletas_nuevas ?? 0} Pal, {r.camadas_sueltas || 0} Cam
+                          </td>
+                          <td className="py-1.5 px-2.5">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              r.check_liberado 
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
+                                : r.check_espera_formato 
+                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' 
+                                : 'bg-amber-50 text-amber-700 border border-amber-100'
+                            }`}>
+                              {statusText}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2.5">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border ${
+                              r.calidad === 'No Cumple'
+                                ? 'bg-red-50 text-red-700 border-red-200'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`}>
+                              {r.calidad || 'Cumple'}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2.5 text-slate-500 italic font-medium whitespace-normal break-all max-w-[120px]">
+                            {r.observaciones || '—'}
                           </td>
                         </tr>
-                      ));
-                    })()}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

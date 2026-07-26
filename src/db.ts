@@ -989,6 +989,10 @@ ALTER TABLE pbo_paletas ALTER COLUMN nca TYPE TEXT;
 ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS paletas_nuevas INTEGER DEFAULT 0;
 ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS fecha_registro TEXT;
 ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS turno_registro INTEGER;
+ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS check_liberado BOOLEAN DEFAULT FALSE;
+ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS check_liberado_parcial BOOLEAN DEFAULT FALSE;
+ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS cantidad_liberada TEXT;
+ALTER TABLE pbo_reprocesos ADD COLUMN IF NOT EXISTS check_espera_formato BOOLEAN DEFAULT FALSE;
 -- ALTER TABLE identificacion_rociadoras ADD COLUMN IF NOT EXISTS hora TEXT;
 -- ALTER TABLE desviaciones_sin_retencion ADD COLUMN IF NOT EXISTS hora TEXT;
 -- ALTER TABLE desviaciones_sin_retencion ADD COLUMN IF NOT EXISTS tipo TEXT;
@@ -1178,10 +1182,14 @@ CREATE TABLE IF NOT EXISTS pbo_reprocesos (
     id_pbo TEXT NOT NULL REFERENCES pbo_lotes(id_pbo) ON DELETE CASCADE,
     tickets_originales_consumidos TEXT NOT NULL,
     nuevo_ticket_reprocesado TEXT NOT NULL,
-    paletas_nuevas INTEGER,
+    paletas_nuevas INTEGER DEFAULT 0,
     camadas_sueltas INTEGER NOT NULL,
     estatus_calidad TEXT NOT NULL,
     estatus_logistica TEXT NOT NULL,
+    check_liberado BOOLEAN DEFAULT FALSE,
+    check_liberado_parcial BOOLEAN DEFAULT FALSE,
+    cantidad_liberada TEXT,
+    check_espera_formato BOOLEAN DEFAULT FALSE,
     usuario_registro TEXT NOT NULL,
     creado_el TEXT NOT NULL,
     fecha_registro TEXT,
@@ -1218,6 +1226,9 @@ NOTIFY pgrst, 'reload schema';
 // ==========================================
 
 export const getLotesPBO = async (): Promise<LotePBO[]> => {
+  const local: LotePBO[] = getLocalData('pbo_lotes');
+  const deletedIds: string[] = getLocalData('pbo_lotes_deleted') || [];
+
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -1225,24 +1236,20 @@ export const getLotesPBO = async (): Promise<LotePBO[]> => {
         .from('pbo_lotes')
         .select('*')
         .order('creado_el', { ascending: false });
-      if (!error && data) return data;
+      if (!error && data) {
+        const filtered = data.filter((item: any) => !deletedIds.includes(item.id_pbo));
+        setLocalData('pbo_lotes', filtered);
+        return filtered;
+      }
     } catch (e) {
       console.error("Supabase PBO Lotes error", e);
     }
   }
-  return getLocalData('pbo_lotes');
+  return local.filter((item: LotePBO) => !deletedIds.includes(item.id_pbo));
 };
 
 export const saveLotePBO = async (lote: LotePBO): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { error } = await supabase.from('pbo_lotes').upsert(lote);
-      if (!error) return;
-    } catch (e) {
-      console.error("Supabase Save Lote PBO error", e);
-    }
-  }
+  // Always update local data
   const lotes: LotePBO[] = getLocalData('pbo_lotes');
   const index = lotes.findIndex(l => l.id_pbo === lote.id_pbo);
   if (index !== -1) {
@@ -1251,22 +1258,27 @@ export const saveLotePBO = async (lote: LotePBO): Promise<void> => {
     lotes.push(lote);
   }
   setLocalData('pbo_lotes', lotes);
-};
 
-export const deleteLotePBO = async (id_pbo: string): Promise<void> => {
+  // Clear from deleted tracking if present
+  const deletedIds: string[] = getLocalData('pbo_lotes_deleted') || [];
+  if (deletedIds.includes(lote.id_pbo)) {
+    setLocalData('pbo_lotes_deleted', deletedIds.filter(id => id !== lote.id_pbo));
+  }
+
+  // Try Supabase sync
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      await Promise.all([
-        supabase.from('pbo_lotes').delete().eq('id_pbo', id_pbo),
-        supabase.from('pbo_paletas').delete().eq('id_pbo', id_pbo),
-        supabase.from('pbo_reprocesos').delete().eq('id_pbo', id_pbo)
-      ]);
-      return;
+      const { error } = await supabase.from('pbo_lotes').upsert(lote);
+      if (error) console.error("Supabase Save Lote PBO error", error);
     } catch (e) {
-      console.error("Supabase Delete Lote PBO error", e);
+      console.error("Supabase Save Lote PBO error", e);
     }
   }
+};
+
+export const deleteLotePBO = async (id_pbo: string): Promise<void> => {
+  // Always update local data
   const lotes: LotePBO[] = getLocalData('pbo_lotes');
   setLocalData('pbo_lotes', lotes.filter(l => l.id_pbo !== id_pbo));
 
@@ -1275,31 +1287,51 @@ export const deleteLotePBO = async (id_pbo: string): Promise<void> => {
 
   const reprocesos: Reproceso[] = getLocalData('pbo_reprocesos');
   setLocalData('pbo_reprocesos', reprocesos.filter(r => r.id_pbo !== id_pbo));
+
+  // Mark as deleted locally
+  const deletedLotes: string[] = getLocalData('pbo_lotes_deleted') || [];
+  if (!deletedLotes.includes(id_pbo)) {
+    deletedLotes.push(id_pbo);
+    setLocalData('pbo_lotes_deleted', deletedLotes);
+  }
+
+  // Try Supabase sync
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await Promise.all([
+        supabase.from('pbo_lotes').delete().eq('id_pbo', id_pbo),
+        supabase.from('pbo_paletas').delete().eq('id_pbo', id_pbo),
+        supabase.from('pbo_reprocesos').delete().eq('id_pbo', id_pbo)
+      ]);
+    } catch (e) {
+      console.error("Supabase Delete Lote PBO error", e);
+    }
+  }
 };
 
 export const getPaletasPBO = async (): Promise<Paleta[]> => {
+  const local: Paleta[] = getLocalData('pbo_paletas');
+  const deletedIds: string[] = getLocalData('pbo_paletas_deleted') || [];
+
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
       const { data, error } = await supabase.from('pbo_paletas').select('*');
-      if (!error && data) return data;
+      if (!error && data) {
+        const filtered = data.filter((item: any) => !deletedIds.includes(item.id));
+        setLocalData('pbo_paletas', filtered);
+        return filtered;
+      }
     } catch (e) {
       console.error("Supabase PBO Paletas error", e);
     }
   }
-  return getLocalData('pbo_paletas');
+  return local.filter((item: Paleta) => !deletedIds.includes(item.id));
 };
 
 export const savePaletasPBO = async (paletasToSave: Paleta[]): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { error } = await supabase.from('pbo_paletas').upsert(paletasToSave);
-      if (!error) return;
-    } catch (e) {
-      console.error("Supabase Save Paletas PBO error", e);
-    }
-  }
+  // Always update local data
   const paletas: Paleta[] = getLocalData('pbo_paletas');
   paletasToSave.forEach(pToSave => {
     const idx = paletas.findIndex(p => p.id === pToSave.id);
@@ -1310,72 +1342,151 @@ export const savePaletasPBO = async (paletasToSave: Paleta[]): Promise<void> => 
     }
   });
   setLocalData('pbo_paletas', paletas);
+
+  // Clear saved IDs from deleted tracking
+  const deletedIds: string[] = getLocalData('pbo_paletas_deleted') || [];
+  const savedIds = paletasToSave.map(p => p.id);
+  const remainingDeleted = deletedIds.filter(id => !savedIds.includes(id));
+  setLocalData('pbo_paletas_deleted', remainingDeleted);
+
+  // Try Supabase sync
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('pbo_paletas').upsert(paletasToSave);
+      if (error) console.error("Supabase Save Paletas PBO error", error);
+    } catch (e) {
+      console.error("Supabase Save Paletas PBO error", e);
+    }
+  }
 };
 
 
 export const getReprocesosPBO = async (): Promise<Reproceso[]> => {
+  const local: Reproceso[] = getLocalData('pbo_reprocesos');
+  const deletedIds: string[] = getLocalData('pbo_reprocesos_deleted') || [];
+
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
       const { data, error } = await supabase.from('pbo_reprocesos').select('*');
-      if (!error && data) return data;
+      if (!error && data) {
+        const filtered = data.filter((item: any) => !deletedIds.includes(item.id));
+        setLocalData('pbo_reprocesos', filtered);
+        return filtered;
+      }
     } catch (e) {
       console.error("Supabase PBO Reproceso error", e);
     }
   }
-  return getLocalData('pbo_reprocesos');
+  return local.filter((item: Reproceso) => !deletedIds.includes(item.id));
 };
 
 export const saveReprocesoPBO = async (reproceso: Reproceso): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { error } = await supabase.from('pbo_reprocesos').upsert(reproceso);
-      if (!error) return;
-    } catch (e) {
-      console.error("Supabase Save Reproceso PBO error", e);
-    }
-  }
+  // Always update local data first
   const reprocesos: Reproceso[] = getLocalData('pbo_reprocesos');
   const index = reprocesos.findIndex(r => r.id === reproceso.id);
   if (index !== -1) {
     reprocesos[index] = reproceso;
   } else {
-    reprocesos.push(reproceso);
+    reprocesos.unshift(reproceso);
   }
   setLocalData('pbo_reprocesos', reprocesos);
+
+  // Clear saved ID from deleted tracking
+  const deletedIds: string[] = getLocalData('pbo_reprocesos_deleted') || [];
+  if (deletedIds.includes(reproceso.id)) {
+    setLocalData('pbo_reprocesos_deleted', deletedIds.filter(id => id !== reproceso.id));
+  }
+
+  // Try Supabase sync
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const cleanData = Object.fromEntries(
+        Object.entries(reproceso).filter(([_, v]) => v !== undefined)
+      );
+      const { error } = await supabase.from('pbo_reprocesos').upsert(cleanData);
+      if (error) {
+        console.warn("Supabase Save Reproceso PBO error:", error.message || error);
+        // Fallback in case Supabase schema is missing check_* or optional columns
+        const coreData = {
+          id: reproceso.id,
+          id_pbo: reproceso.id_pbo,
+          tickets_originales_consumidos: reproceso.tickets_originales_consumidos,
+          nuevo_ticket_reprocesado: reproceso.nuevo_ticket_reprocesado,
+          camadas_sueltas: reproceso.camadas_sueltas,
+          paletas_nuevas: reproceso.paletas_nuevas ?? 0,
+          estatus_calidad: reproceso.estatus_calidad,
+          estatus_logistica: reproceso.estatus_logistica,
+          usuario_registro: reproceso.usuario_registro,
+          creado_el: reproceso.creado_el,
+          fecha_registro: reproceso.fecha_registro,
+          turno_registro: reproceso.turno_registro,
+          calidad: reproceso.calidad || 'Cumple',
+          observaciones: reproceso.observaciones || '',
+        };
+        const { error: fallbackError } = await supabase.from('pbo_reprocesos').upsert(coreData);
+        if (fallbackError) {
+          console.error("Supabase Fallback Save Reproceso error:", fallbackError.message || fallbackError);
+        }
+      }
+    } catch (e) {
+      console.error("Supabase Save Reproceso PBO catch error", e);
+    }
+  }
 };
 
 export const deleteReprocesoPBO = async (id: string): Promise<void> => {
+  // Always update local data
+  let reprocesos: Reproceso[] = getLocalData('pbo_reprocesos');
+  reprocesos = reprocesos.filter((r: Reproceso) => r.id !== id);
+  setLocalData('pbo_reprocesos', reprocesos);
+
+  // Track deleted ID locally so getReprocesosPBO will never bring it back if Supabase delete fails or RLS blocks it
+  const deletedIds: string[] = getLocalData('pbo_reprocesos_deleted') || [];
+  if (!deletedIds.includes(id)) {
+    deletedIds.push(id);
+    setLocalData('pbo_reprocesos_deleted', deletedIds);
+  }
+
+  // Try Supabase sync
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
       const { error } = await supabase.from('pbo_reprocesos').delete().eq('id', id);
-      if (error) throw error;
-      return;
+      if (error) {
+        console.error("Supabase Delete Reproceso PBO error:", error.message || error);
+      }
     } catch (e) {
       console.error("Supabase Delete Reproceso PBO error", e);
     }
   }
-  let reprocesos = getLocalData('pbo_reprocesos');
-  reprocesos = reprocesos.filter((r: Reproceso) => r.id !== id);
-  setLocalData('pbo_reprocesos', reprocesos);
 };
 
 export const deletePaletaPBO = async (id: string): Promise<void> => {
+  // Always update local data
+  let paletas: Paleta[] = getLocalData('pbo_paletas');
+  paletas = paletas.filter((p: Paleta) => p.id !== id);
+  setLocalData('pbo_paletas', paletas);
+
+  // Track deleted ID locally
+  const deletedIds: string[] = getLocalData('pbo_paletas_deleted') || [];
+  if (!deletedIds.includes(id)) {
+    deletedIds.push(id);
+    setLocalData('pbo_paletas_deleted', deletedIds);
+  }
+
+  // Try Supabase sync
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
       const { error } = await supabase.from('pbo_paletas').delete().eq('id', id);
-      if (error) throw error;
-      return;
+      if (error) console.error("Supabase Delete Paleta PBO error", error);
     } catch (e) {
       console.error("Supabase Delete Paleta PBO error", e);
     }
   }
-  let paletas = getLocalData('pbo_paletas');
-  paletas = paletas.filter((p: Paleta) => p.id !== id);
-  setLocalData('pbo_paletas', paletas);
 };
 
 export const getRocePruebas = async (): Promise<RocePrueba[]> => {

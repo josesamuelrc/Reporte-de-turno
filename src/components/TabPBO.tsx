@@ -386,14 +386,14 @@ export default function TabPBO({
   const [reproForm, setReproForm] = useState({
     tickets_originales_consumidos: '',
     nuevo_ticket_reprocesado: '',
-    paletas_nuevas: 1,
+    paletas_nuevas: 0,
     camadas_sueltas: 0,
     cantidad_envases: 0,
     cantidad_unidades: 1,
     check_liberado: false,
-    check_liberado_parcial: false,
-    cantidad_liberada: '',
     check_espera_formato: false,
+    calidad: 'Cumple' as 'Cumple' | 'No Cumple',
+    observaciones: '',
   });
 
   const [editingRepro, setEditingRepro] = useState<Reproceso | null>(null);
@@ -448,6 +448,16 @@ export default function TabPBO({
     }
     // Reset custom Reproceso form fields when switching lotes
     setSelectedOriginalTickets([]);
+    setReproForm({
+      tickets_originales_consumidos: '',
+      nuevo_ticket_reprocesado: '',
+      paletas_nuevas: 0,
+      camadas_sueltas: 0,
+      cantidad_envases: 0,
+      cantidad_unidades: 1,
+      check_liberado: false,
+      check_espera_formato: false,
+    });
     setCantPaletasGen(1);
     setCantCamadasGen(0);
     setGeneratedTicketInputs([]);
@@ -750,34 +760,44 @@ export default function TabPBO({
     }
     if (!selectedLoteId) return;
 
-    if (!reproForm.nuevo_ticket_reprocesado) {
-      alert("Debe indicar al menos un número de ticket.");
-      return;
-    }
-
-    const inputTickets = reproForm.nuevo_ticket_reprocesado
+    let inputTickets = reproForm.nuevo_ticket_reprocesado
       .split(/[\s,;\n]+/)
       .map(t => t.trim().toUpperCase())
       .filter(t => t.length > 0);
 
     if (inputTickets.length === 0) {
-      alert("No se ingresaron números de ticket válidos.");
-      return;
+      const cleanDate = cabeceraFecha ? cabeceraFecha.replace(/-/g, '') : new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const autoTicket = `TKT-${cleanDate}-REWORK-A1`;
+      inputTickets = [autoTicket];
     }
 
     try {
       let updatedPaletas = [...paletas];
       const paletasToSaveList: Paleta[] = [];
 
-      // 1. Update all selected original tickets to "Reprocesado" to discount them
-      for (const tktOriginal of selectedOriginalTickets) {
-        const existingPaletaIdx = updatedPaletas.findIndex(p => p.id_pbo === selectedLoteId && p.nro_ticket.toUpperCase() === tktOriginal.toUpperCase());
+      // 1. Update all selected original tickets (consumed) to "Reprocesado" to discount them from "Material No Reprocesado"
+      const ticketsToMark = new Set<string>();
+
+      selectedOriginalTickets.forEach(t => ticketsToMark.add(t.toUpperCase().trim()));
+
+      if (reproForm.tickets_originales_consumidos) {
+        reproForm.tickets_originales_consumidos
+          .split(/[\s,;\n]+/)
+          .map(t => t.trim().toUpperCase())
+          .filter(t => t.length > 0 && t !== 'N/A')
+          .forEach(t => ticketsToMark.add(t));
+      }
+
+      for (const tktOriginal of ticketsToMark) {
+        const existingPaletaIdx = updatedPaletas.findIndex(p => p.id_pbo === selectedLoteId && p.nro_ticket.toUpperCase() === tktOriginal);
         if (existingPaletaIdx !== -1) {
           updatedPaletas[existingPaletaIdx] = {
             ...updatedPaletas[existingPaletaIdx],
             estatus: 'Reprocesado' as const
           };
-          paletasToSaveList.push(updatedPaletas[existingPaletaIdx]);
+          if (!paletasToSaveList.some(p => p.id === updatedPaletas[existingPaletaIdx].id)) {
+            paletasToSaveList.push(updatedPaletas[existingPaletaIdx]);
+          }
         }
       }
 
@@ -802,16 +822,17 @@ export default function TabPBO({
         estatus_calidad: 'Aprobado',
         estatus_logistica: 'Confirmado',
         check_liberado: reproForm.check_liberado,
-        check_liberado_parcial: reproForm.check_liberado_parcial,
-        cantidad_liberada: reproForm.check_liberado_parcial ? reproForm.cantidad_liberada : '',
         check_espera_formato: reproForm.check_espera_formato,
         usuario_registro: usuarioRegistro || 'CALIDAD (REPROCESO)',
         creado_el: new Date().toISOString(),
         fecha_registro: cabeceraFecha,
-        turno_registro: cabeceraTurno
+        turno_registro: cabeceraTurno,
+        calidad: reproForm.calidad,
+        observaciones: reproForm.observaciones
       };
       
       await saveReprocesoPBO(nuevoRep);
+      setReprocesos(prev => [nuevoRep, ...prev]);
 
       if (paletasToSaveList.length > 0) {
         await savePaletasPBO(paletasToSaveList);
@@ -823,14 +844,14 @@ export default function TabPBO({
       setReproForm({
         tickets_originales_consumidos: '',
         nuevo_ticket_reprocesado: '',
-        paletas_nuevas: 1,
+        paletas_nuevas: 0,
         camadas_sueltas: 0,
         cantidad_envases: 0,
         cantidad_unidades: 1,
         check_liberado: false,
-        check_liberado_parcial: false,
-        cantidad_liberada: '',
         check_espera_formato: false,
+        calidad: 'Cumple',
+        observaciones: ''
       });
       setSelectedOriginalTickets([]);
       setRefreshTrigger(p => p + 1);
@@ -841,25 +862,16 @@ export default function TabPBO({
     }
   };
 
-  const handleToggleReproCheck = async (repro: Reproceso, field: 'check_liberado' | 'check_liberado_parcial' | 'check_espera_formato') => {
+  const handleToggleReproCheck = async (repro: Reproceso, field: 'check_liberado' | 'check_espera_formato') => {
     if (currentRole !== 'calidad') {
       alert("Acceso denegado: Solo Calidad puede modificar los checks de reproceso.");
       return;
     }
     const newValue = !repro[field];
-    let newCant = repro.cantidad_liberada || '';
-
-    if (field === 'check_liberado_parcial' && newValue) {
-      const input = window.prompt("Indique la cantidad liberada parcialmente (ej: 2 paletas, 1500 latas):", newCant || "1 paleta");
-      if (input !== null) {
-        newCant = input;
-      }
-    }
 
     const updatedRepro: Reproceso = {
       ...repro,
-      [field]: newValue,
-      cantidad_liberada: field === 'check_liberado_parcial' ? newCant : repro.cantidad_liberada
+      [field]: newValue
     };
 
     try {
@@ -900,17 +912,34 @@ export default function TabPBO({
     try {
       await deleteReprocesoPBO(repro.id);
       
-      // Reset the corresponding original paleta status back to "Sin reprocesar"
-      const tkt = repro.nuevo_ticket_reprocesado.toUpperCase();
-      const paletaObj = paletas.find(p => p.id_pbo === repro.id_pbo && p.nro_ticket.toUpperCase() === tkt);
-      if (paletaObj) {
-        const updatedPaleta = { ...paletaObj, estatus: 'Sin reprocesar' as const };
-        await savePaletasPBO([updatedPaleta]);
-        setPaletas(prev => prev.map(p => p.id === paletaObj.id ? updatedPaleta : p));
+      // Parse consumed original ticket tokens in this reproceso
+      const consumedRaw = repro.tickets_originales_consumidos || '';
+      const consumedTokens = consumedRaw
+        .split(/[\s,;\n]+/)
+        .map(t => t.trim().toUpperCase())
+        .filter(t => t.length > 0 && t !== 'N/A');
+
+      const paletasToSave: Paleta[] = [];
+      const updatedPaletas = paletas.map(p => {
+        if (p.id_pbo === repro.id_pbo) {
+          const matchesTicket = consumedTokens.some(tok => p.nro_ticket.toUpperCase() === tok);
+          if (matchesTicket && p.estatus === 'Reprocesado') {
+            const resetPaleta = { ...p, estatus: 'Sin reprocesar' as const };
+            paletasToSave.push(resetPaleta);
+            return resetPaleta;
+          }
+        }
+        return p;
+      });
+
+      if (paletasToSave.length > 0) {
+        await savePaletasPBO(paletasToSave);
       }
+      setPaletas(updatedPaletas);
+      setReprocesos(prev => prev.filter(r => r.id !== repro.id));
       
       setRefreshTrigger(p => p + 1);
-      alert("Reproceso eliminado con éxito. La paleta ha sido devuelta al estatus 'Sin reprocesar'.");
+      alert("Reproceso eliminado con éxito. Las paletas consumidas han sido devueltas al estatus 'Sin reprocesar'.");
     } catch (err) {
       console.error(err);
       alert("Error al eliminar el reproceso.");
@@ -2259,11 +2288,10 @@ export default function TabPBO({
                   {pboTabActive === 'info' && (() => {
                     const materialReprocesado = activeLotePaletas.filter(p => p.estatus === 'Reprocesado').reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
                     const materialSalidaReproceso = activeLoteRepros.reduce((acc, r) => acc + ((r.paletas_nuevas || 0) * getCansPerPallet(activeLote.formato)) + ((r.camadas_sueltas || 0) * getCansPerCamada()), 0);
-                    const materialBriqueta = activeLotePaletas.filter(p => p.estatus === 'Briqueta' || p.estatus === 'Desecho').reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
-                    const diferenciaReproceso = Math.max(0, materialReprocesado - materialSalidaReproceso);
-                    const materialNoConforme = materialBriqueta + diferenciaReproceso;
-                    const materialNoReprocesado = activeLotePaletas.filter(p => p.estatus === 'Sin reprocesar' || p.estatus === 'En proceso' || p.estatus === 'Aceptado Con desviacion' || p.estatus === 'Liberado Directo').reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
+                    const materialAceptadoDesviacion = activeLotePaletas.filter(p => p.estatus === 'Aceptado Con desviacion').reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
+                    const materialConforme = materialSalidaReproceso + materialAceptadoDesviacion;
                     const volumenTotalLatas = activeLotePaletas.reduce((acc, p) => acc + (p.camadas_sueltas > 0 ? (p.camadas_sueltas * getCansPerCamada()) : getCansPerPallet(activeLote.formato)), 0);
+                    const materialNoConforme = Math.max(0, volumenTotalLatas - materialConforme);
 
                     return (
                     <div className="space-y-4 text-xs">
@@ -2291,9 +2319,9 @@ export default function TabPBO({
                           <span className="text-blue-600 block font-bold uppercase text-[9px] tracking-wider">Material Reprocesado</span>
                           <span className="font-bold text-blue-800 text-sm mt-0.5 block">{materialReprocesado.toLocaleString()} latas</span>
                         </div>
-                        <div className="bg-amber-50/50 p-3 rounded-xl border border-amber-100">
-                          <span className="text-amber-600 block font-bold uppercase text-[9px] tracking-wider">Material No Reprocesado</span>
-                          <span className="font-bold text-amber-800 text-sm mt-0.5 block">{materialNoReprocesado.toLocaleString()} latas</span>
+                        <div className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100">
+                          <span className="text-emerald-600 block font-bold uppercase text-[9px] tracking-wider">Material Conforme</span>
+                          <span className="font-bold text-emerald-800 text-sm mt-0.5 block">{materialConforme.toLocaleString()} latas</span>
                         </div>
                         <div className="bg-red-50/50 p-3 rounded-xl border border-red-100">
                           <span className="text-red-600 block font-bold uppercase text-[9px] tracking-wider">Material No Conforme</span>
@@ -2545,7 +2573,7 @@ export default function TabPBO({
                                 min="0"
                                 value={reproForm.paletas_nuevas}
                                 onChange={(e) => {
-                                  const val = Math.max(0, parseInt(e.target.value) || 0);
+                                  const val = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value) || 0);
                                   setReproForm(prev => ({ ...prev, paletas_nuevas: val }));
                                 }}
                                 className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-bold"
@@ -2627,7 +2655,7 @@ export default function TabPBO({
                               <label className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block">
                                 Checks de Liberación de Reproceso
                               </label>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                                 <label className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
                                   reproForm.check_liberado ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700'
                                 }`}>
@@ -2638,18 +2666,6 @@ export default function TabPBO({
                                     className="rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
                                   />
                                   <span>✅ Liberado</span>
-                                </label>
-
-                                <label className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
-                                  reproForm.check_liberado_parcial ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700'
-                                }`}>
-                                  <input
-                                    type="checkbox"
-                                    checked={reproForm.check_liberado_parcial}
-                                    onChange={(e) => setReproForm(prev => ({ ...prev, check_liberado_parcial: e.target.checked }))}
-                                    className="rounded text-amber-600 focus:ring-amber-500 h-4 w-4 cursor-pointer"
-                                  />
-                                  <span>⚠️ Liberado Parcialmente</span>
                                 </label>
 
                                 <label className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
@@ -2664,21 +2680,51 @@ export default function TabPBO({
                                   <span>📋 A espera de Formato</span>
                                 </label>
                               </div>
+                            </div>
 
-                              {reproForm.check_liberado_parcial && (
-                                <div className="pt-1.5 animate-fadeIn">
-                                  <label className="text-[10px] font-extrabold text-amber-800 uppercase block mb-1">
-                                    Indicar Cantidad Liberada (Parcial):
-                                  </label>
-                                  <input
-                                    type="text"
-                                    placeholder="Ej: 2 paletas, 1500 latas, 4 camadas"
-                                    value={reproForm.cantidad_liberada}
-                                    onChange={(e) => setReproForm(prev => ({ ...prev, cantidad_liberada: e.target.value }))}
-                                    className="w-full bg-amber-50/60 border border-amber-300 rounded-lg text-xs p-2 font-bold text-amber-950 focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                                  />
+                            {/* Calidad & Observaciones */}
+                            <div className="sm:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-4 bg-white p-3.5 border border-slate-200 rounded-xl">
+                              <div className="sm:col-span-1">
+                                <label className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block mb-1.5">
+                                  Calidad
+                                </label>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setReproForm(prev => ({ ...prev, calidad: 'Cumple' }))}
+                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
+                                      reproForm.calidad === 'Cumple'
+                                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    Cumple
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setReproForm(prev => ({ ...prev, calidad: 'No Cumple' }))}
+                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
+                                      reproForm.calidad === 'No Cumple'
+                                        ? 'bg-red-600 text-white border-red-600 shadow-xs'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    No Cumple
+                                  </button>
                                 </div>
-                              )}
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block mb-1.5">
+                                  Obs. (Opcional)
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="Escriba aquí cualquier observación o comentario del reproceso..."
+                                  value={reproForm.observaciones || ''}
+                                  onChange={(e) => setReproForm(prev => ({ ...prev, observaciones: e.target.value }))}
+                                  className="w-full bg-white border border-slate-200 rounded-lg text-xs p-2 focus:outline-hidden text-slate-800 font-medium"
+                                />
+                              </div>
                             </div>
                           </div>
                           
@@ -2687,7 +2733,7 @@ export default function TabPBO({
                               type="submit"
                               className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
                             >
-                              Registrar Reproceso ({reproForm.nuevo_ticket_reprocesado.split(/[\s,;\n]+/).filter(t => t.trim().length > 0).length || 1} items)
+                              Registrar Reproceso {reproForm.nuevo_ticket_reprocesado.split(/[\s,;\n]+/).filter(t => t.trim().length > 0).length > 0 ? `(${reproForm.nuevo_ticket_reprocesado.split(/[\s,;\n]+/).filter(t => t.trim().length > 0).length} tickets)` : ''}
                             </button>
                           </div>
                         </form>
@@ -2709,6 +2755,8 @@ export default function TabPBO({
                                   <th className="py-2.5 px-3 text-center">Paletas</th>
                                   <th className="py-2.5 px-3 text-center">Camadas</th>
                                   <th className="py-2.5 px-3">Estatus / Checks de Liberación</th>
+                                  <th className="py-2.5 px-3">Calidad</th>
+                                  <th className="py-2.5 px-3">Obs.</th>
                                   <th className="py-2.5 px-3 text-right">Acciones</th>
                                 </tr>
                               </thead>
@@ -2759,24 +2807,6 @@ export default function TabPBO({
                                             <label className="flex items-center gap-1 cursor-pointer">
                                               <input
                                                 type="checkbox"
-                                                checked={editingRepro.check_liberado_parcial || false}
-                                                onChange={(e) => setEditingRepro({ ...editingRepro, check_liberado_parcial: e.target.checked })}
-                                                className="rounded text-amber-600"
-                                              />
-                                              <span className="font-bold text-amber-700">Lib. Parcial</span>
-                                            </label>
-                                            {editingRepro.check_liberado_parcial && (
-                                              <input
-                                                type="text"
-                                                placeholder="Cantidad liberada"
-                                                value={editingRepro.cantidad_liberada || ''}
-                                                onChange={(e) => setEditingRepro({ ...editingRepro, cantidad_liberada: e.target.value })}
-                                                className="w-full bg-amber-50 border border-amber-200 rounded p-1 text-[10px] font-bold"
-                                              />
-                                            )}
-                                            <label className="flex items-center gap-1 cursor-pointer">
-                                              <input
-                                                type="checkbox"
                                                 checked={editingRepro.check_espera_formato || false}
                                                 onChange={(e) => setEditingRepro({ ...editingRepro, check_espera_formato: e.target.checked })}
                                                 className="rounded text-indigo-600"
@@ -2784,6 +2814,25 @@ export default function TabPBO({
                                               <span className="font-bold text-indigo-700">A espera de Formato</span>
                                             </label>
                                           </div>
+                                        </td>
+                                        <td className="py-2 px-3">
+                                          <select
+                                            value={editingRepro.calidad || 'Cumple'}
+                                            onChange={(e) => setEditingRepro({ ...editingRepro, calidad: e.target.value as 'Cumple' | 'No Cumple' })}
+                                            className="bg-white border border-slate-200 rounded p-1 text-xs font-semibold"
+                                          >
+                                            <option value="Cumple">Cumple</option>
+                                            <option value="No Cumple">No Cumple</option>
+                                          </select>
+                                        </td>
+                                        <td className="py-2 px-3">
+                                          <input
+                                            type="text"
+                                            value={editingRepro.observaciones || ''}
+                                            onChange={(e) => setEditingRepro({ ...editingRepro, observaciones: e.target.value })}
+                                            className="w-full bg-white border border-slate-200 rounded p-1 text-xs font-medium"
+                                            placeholder="Obs."
+                                          />
                                         </td>
                                         <td className="py-2 px-3 text-right">
                                           <div className="flex justify-end gap-1.5">
@@ -2828,20 +2877,6 @@ export default function TabPBO({
 
                                           <button
                                             type="button"
-                                            onClick={() => handleToggleReproCheck(r, 'check_liberado_parcial')}
-                                            disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
-                                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
-                                              r.check_liberado_parcial
-                                                ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
-                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                                            }`}
-                                            title="Clic para indicar / modificar Liberado Parcialmente"
-                                          >
-                                            ⚠️ Lib. Parcial {r.check_liberado_parcial && r.cantidad_liberada ? `(${r.cantidad_liberada})` : ''}
-                                          </button>
-
-                                          <button
-                                            type="button"
                                             onClick={() => handleToggleReproCheck(r, 'check_espera_formato')}
                                             disabled={currentRole !== 'calidad' || activeLote.estatus_general === 'Cerrado'}
                                             className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
@@ -2854,6 +2889,20 @@ export default function TabPBO({
                                             📋 A espera de Formato
                                           </button>
                                         </div>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
+                                          r.calidad === 'No Cumple'
+                                            ? 'bg-red-50 text-red-700 border-red-200'
+                                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        }`}>
+                                          {r.calidad || 'Cumple'}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className="text-slate-500 font-medium max-w-[150px] block truncate" title={r.observaciones}>
+                                          {r.observaciones || <span className="text-slate-300 italic font-normal">Sin obs.</span>}
+                                        </span>
                                       </td>
                                       <td className="py-2 px-3 text-right">
                                         {currentRole === 'calidad' && (
@@ -2999,9 +3048,6 @@ export default function TabPBO({
                                     <span className="text-[10px] text-slate-400">NCA: {activeLote.defecto_general.substring(0, 30)}...</span>
                                     {r.check_liberado && (
                                       <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded text-[9px] font-extrabold">✅ Liberado</span>
-                                    )}
-                                    {r.check_liberado_parcial && (
-                                      <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[9px] font-extrabold">⚠️ Lib. Parcial {r.cantidad_liberada ? `(${r.cantidad_liberada})` : ''}</span>
                                     )}
                                     {r.check_espera_formato && (
                                       <span className="bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded text-[9px] font-extrabold">📋 A espera de Formato</span>

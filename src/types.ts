@@ -174,6 +174,8 @@ export interface Reproceso {
   creado_el: string;
   fecha_registro?: string;
   turno_registro?: number;
+  calidad?: 'Cumple' | 'No Cumple';
+  observaciones?: string;
 }
 
 export interface RocePrueba {
