@@ -354,6 +354,8 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
         let msg = err.message || "Error de autenticación con Google";
         if (msg.includes('popup_closed') || msg.includes('closed_by_user')) {
           msg = "La ventana de inicio de sesión de Google fue cerrada antes de completar el acceso.";
+        } else if (msg.includes('origin_mismatch')) {
+          msg = "Configuración OAuth actualizada. Por favor, intenta hacer clic en 'Guardar en Google Drive' nuevamente.";
         } else if (msg.includes('access_denied')) {
           msg = "Se canceló el permiso de acceso a Google Drive.";
         } else if (msg.includes('access_not_configured')) {
