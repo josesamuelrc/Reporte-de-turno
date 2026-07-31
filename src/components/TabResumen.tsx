@@ -107,6 +107,130 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     }
   };
 
+// Helper to convert OKLCH values to sRGB
+function oklchToRgb(l: number, c: number, h: number, a?: number): string {
+  const hRad = (h * Math.PI) / 180;
+  
+  const L = l;
+  const a_lab = c * Math.cos(hRad);
+  const b_lab = c * Math.sin(hRad);
+  
+  const l_lms = L + 0.3963377774 * a_lab + 0.2158037573 * b_lab;
+  const m_lms = L - 0.1055613458 * a_lab - 0.0638541728 * b_lab;
+  const s_lms = L - 0.0894841775 * a_lab - 1.2914855414 * b_lab;
+  
+  const l_cube = Math.pow(Math.max(0, l_lms), 3);
+  const m_cube = Math.pow(Math.max(0, m_lms), 3);
+  const s_cube = Math.pow(Math.max(0, s_lms), 3);
+  
+  const r_lin = +4.0767416621 * l_cube - 3.3077115913 * m_cube + 0.2309699292 * s_cube;
+  const g_lin = -1.2684380046 * l_cube + 2.6097574011 * m_cube - 0.3413193965 * s_cube;
+  const b_lin = -0.0041960863 * l_cube - 0.7034186147 * m_cube + 1.7076147010 * s_cube;
+  
+  const toSRGB = (c_lin: number) => {
+    if (c_lin <= 0.0031308) {
+      return 12.92 * c_lin;
+    }
+    return 1.055 * Math.pow(c_lin, 1 / 2.4) - 0.055;
+  };
+  
+  const r = Math.max(0, Math.min(255, Math.round(toSRGB(r_lin) * 255)));
+  const g = Math.max(0, Math.min(255, Math.round(toSRGB(g_lin) * 255)));
+  const b = Math.max(0, Math.min(255, Math.round(toSRGB(b_lin) * 255)));
+  
+  if (a !== undefined && !isNaN(a)) {
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function parseAndConvertOklch(cssText: string): string {
+  return cssText.replace(/oklch\(\s*([0-9.]+%?)\s+([0-9.]+%?)\s+([0-9.]+(?:deg)?|none)(?:\s*\/\s*([0-9.]+%?))?\s*\)/gi, (match, lStr, cStr, hStr, aStr) => {
+    try {
+      let l = 0;
+      if (lStr.endsWith('%')) {
+        l = parseFloat(lStr) / 100;
+      } else {
+        l = parseFloat(lStr);
+      }
+      
+      let c = 0;
+      if (cStr.endsWith('%')) {
+        c = (parseFloat(cStr) / 100) * 0.4;
+      } else {
+        c = parseFloat(cStr);
+      }
+      
+      let h = 0;
+      if (hStr.toLowerCase() === 'none') {
+        h = 0;
+      } else {
+        h = parseFloat(hStr);
+      }
+      
+      let a: number | undefined = undefined;
+      if (aStr) {
+        if (aStr.endsWith('%')) {
+          a = parseFloat(aStr) / 100;
+        } else {
+          a = parseFloat(aStr);
+        }
+      }
+      
+      return oklchToRgb(l, c, h, a);
+    } catch (e) {
+      return 'rgb(120, 120, 120)';
+    }
+  });
+}
+
+async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
+  const styleElements = Array.from(document.querySelectorAll('style'));
+  const originalStyles = styleElements.map(el => el.innerHTML);
+
+  const linkElements = Array.from(document.querySelectorAll('link[rel="stylesheet"]')) as HTMLLinkElement[];
+  const linksBackup: { element: HTMLLinkElement; styleTag: HTMLStyleElement }[] = [];
+
+  try {
+    styleElements.forEach(el => {
+      el.innerHTML = parseAndConvertOklch(el.innerHTML);
+    });
+
+    for (const link of linkElements) {
+      try {
+        const href = link.href;
+        if (href && href.startsWith(window.location.origin)) {
+          const res = await fetch(href);
+          if (res.ok) {
+            const rawCssText = await res.text();
+            const convertedCss = parseAndConvertOklch(rawCssText);
+            
+            const styleTag = document.createElement('style');
+            styleTag.innerHTML = convertedCss;
+            document.head.appendChild(styleTag);
+            
+            link.disabled = true;
+            linksBackup.push({ element: link, styleTag });
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to preprocess stylesheet link for PDF generation:", link.href, err);
+      }
+    }
+
+    return await fn();
+  } finally {
+    styleElements.forEach((el, index) => {
+      el.innerHTML = originalStyles[index];
+    });
+
+    linksBackup.forEach(backup => {
+      backup.styleTag.remove();
+      backup.element.disabled = false;
+    });
+  }
+}
+
   const [isDownloadingPDF, setIsDownloadingPDF] = useState(false);
 
   const handleDownloadPDF = async () => {
@@ -117,11 +241,13 @@ export default function TabResumen({ reporte }: TabResumenProps) {
         throw new Error("No se encontró el elemento a imprimir.");
       }
 
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
+      const canvas = await runWithOklchPolyfill(async () => {
+        return await html2canvas(element, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff'
+        });
       });
 
       const imgData = canvas.toDataURL('image/jpeg', 0.95);
@@ -197,11 +323,13 @@ export default function TabResumen({ reporte }: TabResumenProps) {
       }
 
       // Capture the element using html2canvas
-      const canvas = await html2canvas(element, {
-        scale: 2, // high quality
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
+      const canvas = await runWithOklchPolyfill(async () => {
+        return await html2canvas(element, {
+          scale: 2, // high quality
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff'
+        });
       });
 
       const imgData = canvas.toDataURL('image/jpeg', 0.95);
