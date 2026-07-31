@@ -144,8 +144,9 @@ function oklchToRgb(l: number, c: number, h: number, a?: number): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-function parseAndConvertOklch(cssText: string): string {
-  return cssText.replace(/oklch\(\s*([0-9.]+%?)\s+([0-9.]+%?)\s+([0-9.]+(?:deg)?|none)(?:\s*\/\s*([0-9.]+%?))?\s*\)/gi, (match, lStr, cStr, hStr, aStr) => {
+function parseAndConvertColors(cssText: string): string {
+  // Convert oklch
+  let converted = cssText.replace(/oklch\(\s*([0-9.]+%?)\s+([0-9.]+%?)\s+([0-9.]+(?:deg)?|none)(?:\s*\/\s*([0-9.]+%?))?\s*\)/gi, (match, lStr, cStr, hStr, aStr) => {
     try {
       let l = 0;
       if (lStr.endsWith('%')) {
@@ -182,6 +183,48 @@ function parseAndConvertOklch(cssText: string): string {
       return 'rgb(120, 120, 120)';
     }
   });
+
+  // Convert oklab
+  converted = converted.replace(/oklab\(\s*([0-9.]+%?)\s+([0-9.-]+%?)\s+([0-9.-]+%?)(?:\s*\/\s*([0-9.]+%?))?\s*\)/gi, (match, lStr, aStr, bStr, alphaStr) => {
+    try {
+      let l = 0;
+      if (lStr.endsWith('%')) {
+        l = parseFloat(lStr) / 100;
+      } else {
+        l = parseFloat(lStr);
+      }
+      
+      let aLab = 0;
+      if (aStr.endsWith('%')) {
+        aLab = (parseFloat(aStr) / 100) * 0.4;
+      } else {
+        aLab = parseFloat(aStr);
+      }
+      
+      let bLab = 0;
+      if (bStr.endsWith('%')) {
+        bLab = (parseFloat(bStr) / 100) * 0.4;
+      } else {
+        bLab = parseFloat(bStr);
+      }
+      
+      let alpha: number | undefined = undefined;
+      if (alphaStr) {
+        if (alphaStr.endsWith('%')) {
+          alpha = parseFloat(alphaStr) / 100;
+        } else {
+          alpha = parseFloat(alphaStr);
+        }
+      }
+      
+      // Since oklab is linear LMS transformation, we can convert it using the same LMS formula
+      return oklchToRgb(l, aLab, bLab, alpha); // in our formula, L, a_lab, b_lab are used directly inside the LMS transformation matrix when calling oklchToRgb with direct x/y coords instead of hue angles!
+    } catch (e) {
+      return 'rgb(120, 120, 120)';
+    }
+  });
+
+  return converted;
 }
 
 async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
@@ -193,7 +236,7 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
 
   try {
     styleElements.forEach(el => {
-      el.innerHTML = parseAndConvertOklch(el.innerHTML);
+      el.innerHTML = parseAndConvertColors(el.innerHTML);
     });
 
     for (const link of linkElements) {
@@ -203,7 +246,7 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
           const res = await fetch(href);
           if (res.ok) {
             const rawCssText = await res.text();
-            const convertedCss = parseAndConvertOklch(rawCssText);
+            const convertedCss = parseAndConvertColors(rawCssText);
             
             const styleTag = document.createElement('style');
             styleTag.innerHTML = convertedCss;
