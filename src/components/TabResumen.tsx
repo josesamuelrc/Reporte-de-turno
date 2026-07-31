@@ -1,10 +1,14 @@
 // TabResumen.tsx - Display Lote column inside tables & grid summaries
 import React, { useRef, useState, useEffect } from 'react';
-import { Printer, AlertOctagon, AlertTriangle, CheckCircle, XCircle, Tag, Layers, FileText, ArrowRightLeft, FileCheck, Copy, Package, ShieldAlert, RotateCcw } from 'lucide-react';
+import { Printer, AlertOctagon, AlertTriangle, CheckCircle, XCircle, Tag, Layers, FileText, ArrowRightLeft, FileCheck, Copy, Package, ShieldAlert, RotateCcw, Cloud, Loader2, LogOut, ExternalLink } from 'lucide-react';
 import { ReporteCompleto, LotePBO, Paleta, Reproceso } from '../types';
 import { getLotesPBO, getPaletasPBO, getReprocesosPBO, getSavedSupabaseConfig } from '../db';
 import { CATALOGO_PRODUCTOS_PBO } from './TabPBO';
 import CompanyLogo from './CompanyLogo';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+import { initAuth, googleSignIn, uploadFileToGoogleDrive, logout } from '../googleAuth';
+import { User } from 'firebase/auth';
 
 interface TabResumenProps {
   reporte: ReporteCompleto | null;
@@ -65,8 +69,185 @@ export default function TabResumen({ reporte }: TabResumenProps) {
     r => r.fecha_registro === cabecera.fecha && r.turno_registro === cabecera.turno
   );
 
-  const handlePrint = () => {
-    window.print();
+  // --- Google Drive PDF state ---
+  const [needsAuth, setNeedsAuth] = useState(true);
+  const [gDriveUser, setGDriveUser] = useState<User | null>(null);
+  const [gDriveToken, setGDriveToken] = useState<string | null>(null);
+  const [isSavingPDF, setIsSavingPDF] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [pdfViewLink, setPdfViewLink] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setGDriveUser(user);
+        setGDriveToken(token);
+        setNeedsAuth(false);
+      },
+      () => {
+        setGDriveUser(null);
+        setGDriveToken(null);
+        setNeedsAuth(true);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const handleGoogleLogout = async () => {
+    try {
+      await logout();
+      setGDriveUser(null);
+      setGDriveToken(null);
+      setNeedsAuth(true);
+      setSaveStatus('idle');
+      setPdfViewLink(null);
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
+  };
+
+  const [isDownloadingPDF, setIsDownloadingPDF] = useState(false);
+
+  const handleDownloadPDF = async () => {
+    setIsDownloadingPDF(true);
+    try {
+      const element = printAreaRef.current;
+      if (!element) {
+        throw new Error("No se encontró el elemento a imprimir.");
+      }
+
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const imgWidth = 210;
+      const pageHeight = 297;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      const formattedDate = cabecera.fecha ? cabecera.fecha.replace(/-/g, '') : 'TEMP';
+      const fileName = `Reporte_Turno_Polar_${formattedDate}_T${cabecera.turno || 'X'}_Grupo_${cabecera.grupo || 'X'}.pdf`;
+
+      pdf.save(fileName);
+    } catch (err: any) {
+      console.error("Failed to download PDF:", err);
+      alert("Error al descargar el PDF: " + err.message);
+    } finally {
+      setIsDownloadingPDF(false);
+    }
+  };
+
+  const handleSavePDF = async () => {
+    setIsSavingPDF(true);
+    setSaveStatus('saving');
+    setSaveError(null);
+    setPdfViewLink(null);
+
+    let currentToken = gDriveToken;
+
+    // 1. Authenticate if needed
+    if (!currentToken || needsAuth) {
+      try {
+        const result = await googleSignIn();
+        if (result) {
+          currentToken = result.accessToken;
+          setGDriveToken(result.accessToken);
+          setGDriveUser(result.user);
+          setNeedsAuth(false);
+        } else {
+          throw new Error("No se pudo iniciar sesión con Google.");
+        }
+      } catch (err: any) {
+        console.error("Auth failed:", err);
+        setSaveError(err.message || "Error de autenticación con Google");
+        setSaveStatus('error');
+        setIsSavingPDF(false);
+        return;
+      }
+    }
+
+    // 2. Generate PDF using html2canvas and jsPDF
+    try {
+      const element = printAreaRef.current;
+      if (!element) {
+        throw new Error("No se encontró el elemento a imprimir.");
+      }
+
+      // Capture the element using html2canvas
+      const canvas = await html2canvas(element, {
+        scale: 2, // high quality
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+      // Create PDF
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const imgWidth = 210; // A4 dimensions
+      const pageHeight = 297;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      const pdfBlob = pdf.output('blob');
+
+      // Generate filename
+      const formattedDate = cabecera.fecha ? cabecera.fecha.replace(/-/g, '') : 'TEMP';
+      const fileName = `Reporte_Turno_Polar_${formattedDate}_T${cabecera.turno || 'X'}_Grupo_${cabecera.grupo || 'X'}.pdf`;
+      const parentFolderId = '1BQXv4gqCFIHiGeRa2G2FXys3ZpuFFbBd';
+
+      // 3. Upload to Google Drive
+      const uploadResult = await uploadFileToGoogleDrive(pdfBlob, fileName, parentFolderId, currentToken);
+      
+      setPdfViewLink(uploadResult.webViewLink);
+      setSaveStatus('success');
+    } catch (err: any) {
+      console.error("Failed to generate or save PDF:", err);
+      setSaveError(err.message || "Error al guardar el PDF en Google Drive");
+      setSaveStatus('error');
+    } finally {
+      setIsSavingPDF(false);
+    }
   };
 
   const generateWhatsAppText = () => {
@@ -339,9 +520,50 @@ export default function TabResumen({ reporte }: TabResumenProps) {
       <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 flex flex-col md:flex-row sm:items-center justify-between gap-4 print:hidden">
         <div>
           <h2 className="text-base font-bold text-slate-800">Visualización de Reporte Final</h2>
-          <p className="text-xs text-slate-500">Revise la infografía compacta del turno. Imprima, guarde como PDF o comparta.</p>
+          <p className="text-xs text-slate-500">Revise la infografía compacta del turno. Comparta por WhatsApp o guarde el PDF directamente en Google Drive.</p>
+          {gDriveUser && (
+            <div className="flex items-center gap-2 mt-1.5 text-[11px] text-slate-500">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Conectado como <strong className="text-slate-700">{gDriveUser.displayName || gDriveUser.email}</strong></span>
+              <button
+                onClick={handleGoogleLogout}
+                className="text-indigo-600 hover:text-indigo-800 font-bold ml-1 flex items-center gap-0.5 cursor-pointer"
+                title="Cerrar sesión de Google"
+              >
+                <LogOut className="w-3 h-3 inline" /> Cerrar sesión
+              </button>
+            </div>
+          )}
+          {saveStatus === 'error' && (
+            <div className="bg-amber-50 text-amber-800 text-[11px] p-3 rounded-xl border border-amber-200 mt-2.5 max-w-md shadow-xs leading-relaxed">
+              <span className="font-bold block mb-1 text-amber-900">💡 Nota sobre cuentas corporativas (@empresaspolar.com):</span>
+              Las cuentas institucionales de Empresas Polar cuentan con restricciones de seguridad de TI que impiden conectar aplicaciones externas de Google Cloud.
+              Si recibes un error de "Acceso bloqueado" o "access_not_configured", usa el botón <strong className="text-slate-900 font-bold">"Descargar PDF Local"</strong> a la derecha para bajar el reporte a tu equipo, y luego súbelo manualmente a tu carpeta de Google Drive.
+            </div>
+          )}
+          {saveStatus === 'error' && saveError && (
+            <p className="text-rose-600 text-[11px] font-bold mt-2">⚠️ Error: {saveError}</p>
+          )}
         </div>
-        <div className="flex flex-wrap gap-2.5">
+        <div className="flex flex-wrap gap-2.5 items-center">
+          <button
+            onClick={handleDownloadPDF}
+            disabled={isDownloadingPDF}
+            className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-950 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md shadow-slate-100 transition-all cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
+          >
+            {isDownloadingPDF ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Generando PDF... 🔄
+              </>
+            ) : (
+              <>
+                <FileText className="w-4 h-4" />
+                Descargar PDF Local 📥
+              </>
+            )}
+          </button>
+
           <button
             onClick={handleWhatsAppShare}
             className={`flex items-center justify-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl shadow-md transition-all cursor-pointer ${
@@ -364,12 +586,50 @@ export default function TabResumen({ reporte }: TabResumenProps) {
           </button>
 
           <button
-            onClick={handlePrint}
-            className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md shadow-slate-200 transition-all cursor-pointer"
+            onClick={handleSavePDF}
+            disabled={isSavingPDF}
+            className={`flex items-center justify-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl shadow-md transition-all cursor-pointer ${
+              saveStatus === 'success'
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-100'
+                : saveStatus === 'error'
+                ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-100'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100'
+            } disabled:opacity-75 disabled:cursor-not-allowed`}
           >
-            <Printer className="w-4 h-4" />
-            Imprimir / Guardar PDF 🖨️
+            {isSavingPDF ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Generando y subiendo... 🔄
+              </>
+            ) : saveStatus === 'success' ? (
+              <>
+                <Cloud className="w-4 h-4 text-emerald-300 animate-pulse" />
+                ¡Guardado en Drive! ✅
+              </>
+            ) : saveStatus === 'error' ? (
+              <>
+                <Cloud className="w-4 h-4" />
+                Reintentar Guardar ❌
+              </>
+            ) : (
+              <>
+                <Cloud className="w-4 h-4" />
+                Guardar PDF en Drive ☁️
+              </>
+            )}
           </button>
+
+          {pdfViewLink && (
+            <a
+              href={pdfViewLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md shadow-slate-200 transition-all cursor-pointer"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Ver en Drive ↗️
+            </a>
+          )}
         </div>
       </div>
 
