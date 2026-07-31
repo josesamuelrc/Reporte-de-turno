@@ -351,7 +351,15 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
         }
       } catch (err: any) {
         console.error("Auth failed:", err);
-        setSaveError(err.message || "Error de autenticación con Google");
+        let msg = err.message || "Error de autenticación con Google";
+        if (msg.includes('auth/unauthorized-domain')) {
+          msg = "El dominio de la aplicación no está autorizado en Firebase para autenticación Google. Usa 'Descargar PDF Local' para guardar el reporte.";
+        } else if (msg.includes('popup-closed-by-user')) {
+          msg = "La ventana de inicio de sesión fue cerrada o bloqueada por el navegador.";
+        } else if (msg.includes('access_not_configured')) {
+          msg = "Acceso bloqueado por políticas de TI de tu organización (@empresaspolar.com). Usa 'Descargar PDF Local'.";
+        }
+        setSaveError(msg);
         setSaveStatus('error');
         setIsSavingPDF(false);
         return;
