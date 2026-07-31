@@ -352,10 +352,10 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
       } catch (err: any) {
         console.error("Auth failed:", err);
         let msg = err.message || "Error de autenticación con Google";
-        if (msg.includes('auth/unauthorized-domain')) {
-          msg = "El dominio de la aplicación no está autorizado en Firebase para autenticación Google. Usa 'Descargar PDF Local' para guardar el reporte.";
-        } else if (msg.includes('popup-closed-by-user')) {
-          msg = "La ventana de inicio de sesión fue cerrada o bloqueada por el navegador.";
+        if (msg.includes('popup_closed') || msg.includes('closed_by_user')) {
+          msg = "La ventana de inicio de sesión de Google fue cerrada antes de completar el acceso.";
+        } else if (msg.includes('access_denied')) {
+          msg = "Se canceló el permiso de acceso a Google Drive.";
         } else if (msg.includes('access_not_configured')) {
           msg = "Acceso bloqueado por políticas de TI de tu organización (@empresaspolar.com). Usa 'Descargar PDF Local'.";
         }
@@ -714,10 +714,18 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
             </div>
           )}
           {saveStatus === 'error' && (
-            <div className="bg-amber-50 text-amber-800 text-[11px] p-3 rounded-xl border border-amber-200 mt-2.5 max-w-md shadow-xs leading-relaxed">
-              <span className="font-bold block mb-1 text-amber-900">💡 Nota sobre cuentas corporativas (@empresaspolar.com):</span>
-              Las cuentas institucionales de Empresas Polar cuentan con restricciones de seguridad de TI que impiden conectar aplicaciones externas de Google Cloud.
-              Si recibes un error de "Acceso bloqueado" o "access_not_configured", usa el botón <strong className="text-slate-900 font-bold">"Descargar PDF Local"</strong> a la derecha para bajar el reporte a tu equipo, y luego súbelo manualmente a tu carpeta de Google Drive.
+            <div className="bg-amber-50 text-amber-900 text-[11px] p-3.5 rounded-xl border border-amber-200 mt-2.5 max-w-lg shadow-xs leading-relaxed space-y-2">
+              <div>
+                <span className="font-bold block text-amber-950 text-[12px]">💡 ¿No puedes iniciar sesión en Google Drive?</span>
+                <ul className="list-disc list-inside mt-1 font-medium text-amber-800 space-y-0.5">
+                  <li>Si usas una cuenta corporativa (ej. <code>@empresaspolar.com</code>), la empresa suele bloquear accesos a aplicaciones externas.</li>
+                  <li>Asegúrate de permitir las ventanas emergentes (popups) en tu navegador.</li>
+                </ul>
+              </div>
+              <div className="pt-1 border-t border-amber-200/60">
+                <span className="font-bold block text-amber-950">⚡ Opción rápida directa:</span>
+                Usa el botón <strong className="text-slate-900 font-bold">"Descargar PDF Local"</strong> para bajar el reporte a tu equipo al instante sin depender de logins de Google.
+              </div>
             </div>
           )}
           {saveStatus === 'error' && saveError && (
