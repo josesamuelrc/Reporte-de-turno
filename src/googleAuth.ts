@@ -212,3 +212,57 @@ export async function uploadFileToAppsScript(
     webViewLink: data.url || data.webViewLink || '',
   };
 }
+
+/**
+ * Submits the PDF base64 payload to Google Apps Script via a hidden HTML form in a new tab.
+ * This utilizes the browser's active Google session (@empresaspolar.com) so Google Apps Script
+ * executes with proper permissions and saves directly to Google Drive.
+ */
+export async function submitFileToAppsScriptViaForm(
+  blob: Blob,
+  fileName: string,
+  parentFolderId: string,
+  webAppUrl: string
+): Promise<void> {
+  const reader = new FileReader();
+  const base64Promise = new Promise<string>((resolve, reject) => {
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      const base64Data = result.split(',')[1] || result;
+      resolve(base64Data);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
+  const base64 = await base64Promise;
+
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = webAppUrl;
+  form.target = '_blank';
+
+  const fields: Record<string, string> = {
+    fileName,
+    filename: fileName,
+    name: fileName,
+    base64,
+    pdfBase64: base64,
+    data: base64,
+    folderId: parentFolderId || '1BQXv4gqCFIHiGeRa2G2FXys3ZpuFFbBd',
+    mimeType: 'application/pdf',
+  };
+
+  for (const [key, val] of Object.entries(fields)) {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = key;
+    input.value = val;
+    form.appendChild(input);
+  }
+
+  document.body.appendChild(form);
+  form.submit();
+  document.body.removeChild(form);
+}
+

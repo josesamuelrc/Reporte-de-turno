@@ -7,7 +7,7 @@ import { CATALOGO_PRODUCTOS_PBO } from './TabPBO';
 import CompanyLogo from './CompanyLogo';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { initAuth, googleSignIn, uploadFileToGoogleDrive, uploadFileToAppsScript, logout } from '../googleAuth';
+import { initAuth, googleSignIn, uploadFileToGoogleDrive, uploadFileToAppsScript, submitFileToAppsScriptViaForm, logout } from '../googleAuth';
 import { User } from 'firebase/auth';
 
 interface TabResumenProps {
@@ -386,7 +386,19 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
       const formattedDate = cabecera.fecha ? cabecera.fecha.replace(/-/g, '') : 'TEMP';
       const fileName = `Reporte_Turno_Polar_${formattedDate}_T${cabecera.turno || 'X'}_Grupo_${cabecera.grupo || 'X'}.pdf`;
 
-      // 2. Try sending directly to Google Apps Script Web App (bypasses browser login & OAuth restrictions)
+      // 2. Submit directly to Google Apps Script Web App via Form Submission in a new tab.
+      // Since it opens in a top-level browser tab, the browser automatically attaches the active
+      // @empresaspolar.com Google session, bypassing CORS and saving directly to Drive.
+      try {
+        await submitFileToAppsScriptViaForm(pdfBlob, fileName, parentFolderId, APPS_SCRIPT_URL);
+        setSaveStatus('success');
+        setIsSavingPDF(false);
+        return;
+      } catch (scriptErr: any) {
+        console.warn("Apps Script form submission failed, trying direct fetch...", scriptErr);
+      }
+
+      // 3. Fallback: Try background fetch to Apps Script
       try {
         const uploadResult = await uploadFileToAppsScript(pdfBlob, fileName, parentFolderId, APPS_SCRIPT_URL);
         setPdfViewLink(uploadResult.webViewLink || null);
@@ -394,10 +406,10 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
         setIsSavingPDF(false);
         return;
       } catch (scriptErr: any) {
-        console.warn("Apps Script submission failed, trying direct OAuth fallback...", scriptErr);
+        console.warn("Apps Script fetch failed, trying direct OAuth fallback...", scriptErr);
       }
 
-      // 3. Fallback: Authenticate via Google OAuth if needed
+      // 4. Fallback: Authenticate via Google OAuth if needed
       let currentToken = gDriveToken;
       if (!currentToken || needsAuth) {
         const result = await googleSignIn();
@@ -411,7 +423,7 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
         }
       }
 
-      // 4. Fallback Upload via Google Drive REST API
+      // 5. Fallback Upload via Google Drive REST API
       const uploadResult = await uploadFileToGoogleDrive(pdfBlob, fileName, parentFolderId, currentToken);
       
       setPdfViewLink(uploadResult.webViewLink);
@@ -803,7 +815,7 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
             ) : saveStatus === 'success' ? (
               <>
                 <Cloud className="w-4 h-4 text-emerald-300 animate-pulse" />
-                ¡Guardado en Drive! ✅
+                ¡Enviado a Drive! ✅
               </>
             ) : saveStatus === 'error' ? (
               <>
@@ -817,6 +829,17 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
               </>
             )}
           </button>
+
+          <a
+            href="https://script.google.com/a/macros/empresaspolar.com/s/AKfycbwrv760xyHAHyEvYRUJwoT55QjlVuCYpaR4CazNxm_T1JKYluYG3LL48xu-Tu8vzxOL/exec"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2.5 rounded-xl border border-slate-200 shadow-xs transition-all cursor-pointer"
+            title="Abrir la App de Google Apps Script para iniciar sesión con tu correo corporativo"
+          >
+            <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
+            Abrir App Google Script ↗
+          </a>
 
           {pdfViewLink && (
             <a
