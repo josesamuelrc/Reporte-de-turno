@@ -7,7 +7,7 @@ import { CATALOGO_PRODUCTOS_PBO } from './TabPBO';
 import CompanyLogo from './CompanyLogo';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { initAuth, googleSignIn, uploadFileToGoogleDrive, logout } from '../googleAuth';
+import { initAuth, googleSignIn, uploadFileToGoogleDrive, uploadFileToAppsScript, logout } from '../googleAuth';
 import { User } from 'firebase/auth';
 
 interface TabResumenProps {
@@ -335,40 +335,10 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
     setSaveError(null);
     setPdfViewLink(null);
 
-    let currentToken = gDriveToken;
+    const APPS_SCRIPT_URL = "https://script.google.com/a/macros/empresaspolar.com/s/AKfycbwrv760xyHAHyEvYRUJwoT55QjlVuCYpaR4CazNxm_T1JKYluYG3LL48xu-Tu8vzxOL/exec";
+    const parentFolderId = '1BQXv4gqCFIHiGeRa2G2FXys3ZpuFFbBd';
 
-    // 1. Authenticate if needed
-    if (!currentToken || needsAuth) {
-      try {
-        const result = await googleSignIn();
-        if (result) {
-          currentToken = result.accessToken;
-          setGDriveToken(result.accessToken);
-          setGDriveUser(result.user);
-          setNeedsAuth(false);
-        } else {
-          throw new Error("No se pudo iniciar sesión con Google.");
-        }
-      } catch (err: any) {
-        console.error("Auth failed:", err);
-        let msg = err.message || "Error de autenticación con Google";
-        if (msg.includes('popup_closed') || msg.includes('closed_by_user')) {
-          msg = "La ventana de inicio de sesión de Google fue cerrada antes de completar el acceso.";
-        } else if (msg.includes('origin_mismatch')) {
-          msg = "Configuración OAuth actualizada. Por favor, intenta hacer clic en 'Guardar en Google Drive' nuevamente.";
-        } else if (msg.includes('access_denied')) {
-          msg = "Se canceló el permiso de acceso a Google Drive.";
-        } else if (msg.includes('access_not_configured')) {
-          msg = "Acceso bloqueado por políticas de TI de tu organización (@empresaspolar.com). Usa 'Descargar PDF Local'.";
-        }
-        setSaveError(msg);
-        setSaveStatus('error');
-        setIsSavingPDF(false);
-        return;
-      }
-    }
-
-    // 2. Generate PDF using html2canvas and jsPDF
+    // 1. Generate PDF using html2canvas and jsPDF
     try {
       const element = printAreaRef.current;
       if (!element) {
@@ -415,16 +385,48 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
       // Generate filename
       const formattedDate = cabecera.fecha ? cabecera.fecha.replace(/-/g, '') : 'TEMP';
       const fileName = `Reporte_Turno_Polar_${formattedDate}_T${cabecera.turno || 'X'}_Grupo_${cabecera.grupo || 'X'}.pdf`;
-      const parentFolderId = '1BQXv4gqCFIHiGeRa2G2FXys3ZpuFFbBd';
 
-      // 3. Upload to Google Drive
+      // 2. Try sending directly to Google Apps Script Web App (bypasses browser login & OAuth restrictions)
+      try {
+        const uploadResult = await uploadFileToAppsScript(pdfBlob, fileName, parentFolderId, APPS_SCRIPT_URL);
+        setPdfViewLink(uploadResult.webViewLink || null);
+        setSaveStatus('success');
+        setIsSavingPDF(false);
+        return;
+      } catch (scriptErr: any) {
+        console.warn("Apps Script submission failed, trying direct OAuth fallback...", scriptErr);
+      }
+
+      // 3. Fallback: Authenticate via Google OAuth if needed
+      let currentToken = gDriveToken;
+      if (!currentToken || needsAuth) {
+        const result = await googleSignIn();
+        if (result) {
+          currentToken = result.accessToken;
+          setGDriveToken(result.accessToken);
+          setGDriveUser(result.user);
+          setNeedsAuth(false);
+        } else {
+          throw new Error("No se pudo iniciar sesión con Google.");
+        }
+      }
+
+      // 4. Fallback Upload via Google Drive REST API
       const uploadResult = await uploadFileToGoogleDrive(pdfBlob, fileName, parentFolderId, currentToken);
       
       setPdfViewLink(uploadResult.webViewLink);
       setSaveStatus('success');
     } catch (err: any) {
       console.error("Failed to generate or save PDF:", err);
-      setSaveError(err.message || "Error al guardar el PDF en Google Drive");
+      let msg = err.message || "Error al guardar el PDF en Google Drive";
+      if (msg.includes('popup_closed') || msg.includes('closed_by_user')) {
+        msg = "La ventana de inicio de sesión de Google fue cerrada antes de completar el acceso.";
+      } else if (msg.includes('origin_mismatch')) {
+        msg = "Configuración OAuth de Google no completada en el dominio actual. Puedes usar 'Descargar PDF Local'.";
+      } else if (msg.includes('access_denied')) {
+        msg = "Se canceló el permiso de acceso a Google Drive.";
+      }
+      setSaveError(msg);
       setSaveStatus('error');
     } finally {
       setIsSavingPDF(false);
@@ -454,11 +456,19 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
     text += `👤 *Analista:* ${cabecera.analista || 'No asignado'}\n`;
     text += `⭐ *Star Quality:* ${cabecera.temp_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
     text += `🎛️ *Equipos de Medición:* ${cabecera.hum_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
+    text += `📋 *PIE de Calidad:* ${cabecera.pie_calidad_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
+    text += `⚙️ *PIE de Operaciones:* ${cabecera.pie_operaciones_cumple !== false ? 'CUMPLE ✅' : 'NO CUMPLE ❌'}\n`;
     if (cabecera.caida_tension) {
       text += `⚡ *Caídas de Tensión:* ${cabecera.caida_tension}\n`;
     }
     if ((cabecera.temp_cumple === false || cabecera.hum_cumple === false) && cabecera.observaciones_ambiente) {
-      text += `⚠️ *Obs. Desviaciones:* ${cabecera.observaciones_ambiente}\n`;
+      text += `⚠️ *Obs. Desviaciones Star/Equipos:* ${cabecera.observaciones_ambiente}\n`;
+    }
+    if (cabecera.pie_calidad_cumple === false && cabecera.observacion_pie_calidad) {
+      text += `⚠️ *Obs. PIE Calidad:* ${cabecera.observacion_pie_calidad}\n`;
+    }
+    if (cabecera.pie_operaciones_cumple === false && cabecera.observacion_pie_operaciones) {
+      text += `⚠️ *Obs. PIE Operaciones:* ${cabecera.observacion_pie_operaciones}\n`;
     }
     text += `\n------------------------------------\n\n`;
 
@@ -866,18 +876,18 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
         </div>
 
         {/* METRICS & PARAMETERS CHECK */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
           {/* Star Quality Status */}
           <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl flex items-center justify-between text-xs">
             <div>
-              <span className="block text-xs font-bold text-slate-700 uppercase leading-none">Star Quality</span>
+              <span className="block text-[10px] sm:text-xs font-bold text-slate-700 uppercase leading-none">Star Quality</span>
             </div>
             {cabecera.temp_cumple !== false ? (
-              <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200">
+              <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200 shrink-0">
                 <CheckCircle className="w-3 h-3 text-emerald-600" /> CUMPLE
               </span>
             ) : (
-              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200 animate-pulse">
+              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200 animate-pulse shrink-0">
                 <XCircle className="w-3 h-3 text-rose-600" /> NO CUMPLE
               </span>
             )}
@@ -886,14 +896,46 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
           {/* Equipos de Medición */}
           <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl flex items-center justify-between text-xs">
             <div>
-              <span className="block text-xs font-bold text-slate-700 uppercase leading-none">Equipos de Medición</span>
+              <span className="block text-[10px] sm:text-xs font-bold text-slate-700 uppercase leading-none">Equipos Medición</span>
             </div>
             {cabecera.hum_cumple !== false ? (
-              <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200">
+              <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200 shrink-0">
                 <CheckCircle className="w-3 h-3 text-emerald-600" /> CUMPLE
               </span>
             ) : (
-              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200 animate-pulse">
+              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200 animate-pulse shrink-0">
+                <XCircle className="w-3 h-3 text-rose-600" /> NO CUMPLE
+              </span>
+            )}
+          </div>
+
+          {/* PIE de Calidad */}
+          <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl flex items-center justify-between text-xs">
+            <div>
+              <span className="block text-[10px] sm:text-xs font-bold text-slate-700 uppercase leading-none">PIE Calidad</span>
+            </div>
+            {cabecera.pie_calidad_cumple !== false ? (
+              <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200 shrink-0">
+                <CheckCircle className="w-3 h-3 text-emerald-600" /> CUMPLE
+              </span>
+            ) : (
+              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200 animate-pulse shrink-0">
+                <XCircle className="w-3 h-3 text-rose-600" /> NO CUMPLE
+              </span>
+            )}
+          </div>
+
+          {/* PIE de Operaciones */}
+          <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl flex items-center justify-between text-xs">
+            <div>
+              <span className="block text-[10px] sm:text-xs font-bold text-slate-700 uppercase leading-none">PIE Operaciones</span>
+            </div>
+            {cabecera.pie_operaciones_cumple !== false ? (
+              <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-emerald-200 shrink-0">
+                <CheckCircle className="w-3 h-3 text-emerald-600" /> CUMPLE
+              </span>
+            ) : (
+              <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded text-[10px] font-black flex items-center gap-0.5 border border-rose-200 animate-pulse shrink-0">
                 <XCircle className="w-3 h-3 text-rose-600" /> NO CUMPLE
               </span>
             )}
@@ -901,26 +943,46 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
 
           {/* Caídas de Tensión */}
           <div className="bg-slate-50 border border-slate-150 px-3 py-2 rounded-xl text-xs flex flex-col justify-center">
-            <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Caídas de Tensión</span>
+            <span className="block text-[9px] font-bold text-slate-400 uppercase leading-none">Caídas Tensión</span>
             <span className="text-[11px] font-extrabold text-slate-700 block truncate mt-1">
-              {cabecera.caida_tension || 'Sin caídas de tensión'}
+              {cabecera.caida_tension || 'Sin caídas'}
             </span>
           </div>
         </div>
 
-        {/* Star Quality Obs */}
-        {cabecera.observaciones_ambiente && (
-          <div className={`border px-3 py-1.5 rounded-lg text-[10px] leading-relaxed ${
-            cabecera.temp_cumple === false 
-              ? 'bg-rose-50/40 border-rose-100 text-rose-900' 
-              : 'bg-indigo-50/40 border-indigo-100 text-indigo-900'
-          }`}>
-            <span className="font-extrabold uppercase text-[9px] tracking-wider mr-1">
-              {cabecera.temp_cumple === false ? 'Observación de No Cumplimiento:' : 'Comentario de Star Quality:'}
-            </span>
-            {cabecera.observaciones_ambiente}
-          </div>
-        )}
+        {/* Observations */}
+        <div className="flex flex-col gap-1.5">
+          {cabecera.observaciones_ambiente && (
+            <div className={`border px-3 py-1.5 rounded-lg text-[10px] leading-relaxed ${
+              cabecera.temp_cumple === false || cabecera.hum_cumple === false
+                ? 'bg-rose-50/40 border-rose-100 text-rose-900' 
+                : 'bg-indigo-50/40 border-indigo-100 text-indigo-900'
+            }`}>
+              <span className="font-extrabold uppercase text-[9px] tracking-wider mr-1">
+                {cabecera.temp_cumple === false || cabecera.hum_cumple === false ? 'Obs. Star Quality / Equipos:' : 'Comentario:'}
+              </span>
+              {cabecera.observaciones_ambiente}
+            </div>
+          )}
+
+          {cabecera.pie_calidad_cumple === false && cabecera.observacion_pie_calidad && (
+            <div className="border px-3 py-1.5 rounded-lg text-[10px] leading-relaxed bg-rose-50/40 border-rose-100 text-rose-900">
+              <span className="font-extrabold uppercase text-[9px] tracking-wider mr-1">
+                Obs. PIE de Calidad (No Cumple):
+              </span>
+              {cabecera.observacion_pie_calidad}
+            </div>
+          )}
+
+          {cabecera.pie_operaciones_cumple === false && cabecera.observacion_pie_operaciones && (
+            <div className="border px-3 py-1.5 rounded-lg text-[10px] leading-relaxed bg-rose-50/40 border-rose-100 text-rose-900">
+              <span className="font-extrabold uppercase text-[9px] tracking-wider mr-1">
+                Obs. PIE de Operaciones (No Cumple):
+              </span>
+              {cabecera.observacion_pie_operaciones}
+            </div>
+          )}
+        </div>
 
         {/* ALERTAS CENTRALES DEL TURNO */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

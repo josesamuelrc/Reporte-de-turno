@@ -12,6 +12,10 @@ export interface ReporteTurno {
   turno: number;
   temp_cumple: boolean;
   hum_cumple: boolean;
+  pie_calidad_cumple?: boolean;
+  observacion_pie_calidad?: string;
+  pie_operaciones_cumple?: boolean;
+  observacion_pie_operaciones?: string;
   caida_tension: string;
   observaciones_ambiente: string;
   equipos_medicion?: string;

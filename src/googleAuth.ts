@@ -149,3 +149,66 @@ export async function uploadFileToGoogleDrive(
 
   return response.json();
 }
+
+/**
+ * Uploads a PDF blob directly to a Google Apps Script Web App endpoint.
+ * Bypasses OAuth logins and origin mismatch restrictions completely.
+ */
+export async function uploadFileToAppsScript(
+  blob: Blob,
+  fileName: string,
+  parentFolderId: string,
+  webAppUrl: string
+): Promise<{ id?: string; name?: string; webViewLink?: string }> {
+  // Convert blob to base64
+  const reader = new FileReader();
+  const base64Promise = new Promise<string>((resolve, reject) => {
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      const base64Data = result.split(',')[1] || result;
+      resolve(base64Data);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
+  const base64 = await base64Promise;
+
+  const payload = {
+    base64,
+    pdfBase64: base64,
+    data: base64,
+    fileContent: base64,
+    fileName,
+    filename: fileName,
+    name: fileName,
+    folderId: parentFolderId || '',
+    mimeType: 'application/pdf',
+  };
+
+  const response = await fetch(webAppUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const resText = await response.text();
+  let data;
+  try {
+    data = JSON.parse(resText);
+  } catch (e) {
+    return { name: fileName, webViewLink: '' };
+  }
+
+  if (data.status === 'error') {
+    throw new Error(data.message || 'Error en Google Apps Script');
+  }
+
+  return {
+    id: data.id,
+    name: data.name || fileName,
+    webViewLink: data.url || data.webViewLink || '',
+  };
+}

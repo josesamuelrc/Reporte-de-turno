@@ -440,6 +440,10 @@ export const guardarReporteCompleto = async (
             turno: cabecera.turno,
             temp_cumple: cabecera.temp_cumple,
             hum_cumple: cabecera.hum_cumple,
+            pie_calidad_cumple: cabecera.pie_calidad_cumple,
+            observacion_pie_calidad: cabecera.observacion_pie_calidad,
+            pie_operaciones_cumple: cabecera.pie_operaciones_cumple,
+            observacion_pie_operaciones: cabecera.observacion_pie_operaciones,
             caida_tension: cabecera.caida_tension,
             observaciones_ambiente: cabecera.observaciones_ambiente
           })
@@ -472,6 +476,10 @@ export const guardarReporteCompleto = async (
             turno: cabecera.turno,
             temp_cumple: cabecera.temp_cumple,
             hum_cumple: cabecera.hum_cumple,
+            pie_calidad_cumple: cabecera.pie_calidad_cumple,
+            observacion_pie_calidad: cabecera.observacion_pie_calidad,
+            pie_operaciones_cumple: cabecera.pie_operaciones_cumple,
+            observacion_pie_operaciones: cabecera.observacion_pie_operaciones,
             caida_tension: cabecera.caida_tension,
             observaciones_ambiente: cabecera.observaciones_ambiente,
             estado: 'Borrador'
@@ -1053,6 +1061,10 @@ CREATE TABLE IF NOT EXISTS reporte_turno (
     turno INTEGER NOT NULL,
     temp_cumple BOOLEAN NOT NULL,
     hum_cumple BOOLEAN NOT NULL,
+    pie_calidad_cumple BOOLEAN DEFAULT TRUE,
+    observacion_pie_calidad TEXT,
+    pie_operaciones_cumple BOOLEAN DEFAULT TRUE,
+    observacion_pie_operaciones TEXT,
     caida_tension TEXT,
     observaciones_ambiente TEXT,
     estado TEXT DEFAULT 'Borrador',
@@ -1215,6 +1227,10 @@ ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS reporte_resolucion_id INTEGER 
 ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS hacia_adelante BOOLEAN DEFAULT FALSE;
 ALTER TABLE trazabilidad ADD COLUMN IF NOT EXISTS hacia_atras BOOLEAN DEFAULT FALSE;
 ALTER TABLE pendientes ADD COLUMN IF NOT EXISTS reporte_resolucion_id INTEGER REFERENCES reporte_turno(id) ON DELETE SET NULL;
+ALTER TABLE reporte_turno ADD COLUMN IF NOT EXISTS pie_calidad_cumple BOOLEAN DEFAULT TRUE;
+ALTER TABLE reporte_turno ADD COLUMN IF NOT EXISTS observacion_pie_calidad TEXT;
+ALTER TABLE reporte_turno ADD COLUMN IF NOT EXISTS pie_operaciones_cumple BOOLEAN DEFAULT TRUE;
+ALTER TABLE reporte_turno ADD COLUMN IF NOT EXISTS observacion_pie_operaciones TEXT;
 
 -- Recargar la caché del esquema de Supabase para que la API reconozca las nuevas tablas y columnas
 NOTIFY pgrst, 'reload schema';
