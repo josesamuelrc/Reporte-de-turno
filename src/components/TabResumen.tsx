@@ -115,9 +115,14 @@ function oklchToRgb(l: number, c: number, h: number, a?: number): string {
   const a_lab = c * Math.cos(hRad);
   const b_lab = c * Math.sin(hRad);
   
-  const l_lms = L + 0.3963377774 * a_lab + 0.2158037573 * b_lab;
-  const m_lms = L - 0.1055613458 * a_lab - 0.0638541728 * b_lab;
-  const s_lms = L - 0.0894841775 * a_lab - 1.2914855414 * b_lab;
+  return oklabToRgb(L, a_lab, b_lab, a);
+}
+
+// Helper to convert OKLAB values to sRGB
+function oklabToRgb(l: number, a_lab: number, b_lab: number, alpha?: number): string {
+  const l_lms = l + 0.3963377774 * a_lab + 0.2158037573 * b_lab;
+  const m_lms = l - 0.1055613458 * a_lab - 0.0638541728 * b_lab;
+  const s_lms = l - 0.0894841775 * a_lab - 1.2914855414 * b_lab;
   
   const l_cube = Math.pow(Math.max(0, l_lms), 3);
   const m_cube = Math.pow(Math.max(0, m_lms), 3);
@@ -138,94 +143,115 @@ function oklchToRgb(l: number, c: number, h: number, a?: number): string {
   const g = Math.max(0, Math.min(255, Math.round(toSRGB(g_lin) * 255)));
   const b = Math.max(0, Math.min(255, Math.round(toSRGB(b_lin) * 255)));
   
-  if (a !== undefined && !isNaN(a)) {
-    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  if (alpha !== undefined && !isNaN(alpha)) {
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+function parseSingleColorCall(fnName: string, inner: string): string {
+  const slashParts = inner.split('/');
+  const colorPart = slashParts[0].trim();
+  const alphaPart = slashParts[1] ? slashParts[1].trim() : undefined;
+
+  const numbers = colorPart.match(/[-+]?[0-9]*\.?[0-9]+(?:e[-+]?[0-9]+)?%?/gi);
+  if (!numbers || numbers.length < 3) {
+    return 'rgb(120, 120, 120)';
+  }
+
+  let l = parseFloat(numbers[0]);
+  if (numbers[0].endsWith('%')) l /= 100;
+
+  let c_or_a = parseFloat(numbers[1]);
+  if (numbers[1].endsWith('%')) c_or_a /= 100;
+
+  let h_or_b = parseFloat(numbers[2]);
+  if (numbers[2].endsWith('%')) h_or_b /= 100;
+
+  let alpha: number | undefined = undefined;
+  if (alphaPart) {
+    const alphaMatch = alphaPart.match(/[-+]?[0-9]*\.?[0-9]+%?/);
+    if (alphaMatch) {
+      alpha = parseFloat(alphaMatch[0]);
+      if (alphaMatch[0].endsWith('%')) alpha /= 100;
+    }
+  }
+
+  if (fnName === 'oklch' || fnName === 'lch') {
+    return oklchToRgb(l, c_or_a, h_or_b, alpha);
+  } else {
+    return oklabToRgb(l, c_or_a, h_or_b, alpha);
+  }
+}
+
 function parseAndConvertColors(cssText: string): string {
-  // Convert oklch
-  let converted = cssText.replace(/oklch\(\s*([0-9.]+%?)\s+([0-9.]+%?)\s+([0-9.]+(?:deg)?|none)(?:\s*\/\s*([0-9.]+%?))?\s*\)/gi, (match, lStr, cStr, hStr, aStr) => {
+  if (!cssText) return '';
+
+  let converted = cssText.replace(/\b(oklab|oklch|lab|lch)\s*\(([^()]+(?:\([^()]*\)[^()]*)*)\)/gi, (match, fnName, inner) => {
     try {
-      let l = 0;
-      if (lStr.endsWith('%')) {
-        l = parseFloat(lStr) / 100;
-      } else {
-        l = parseFloat(lStr);
-      }
-      
-      let c = 0;
-      if (cStr.endsWith('%')) {
-        c = (parseFloat(cStr) / 100) * 0.4;
-      } else {
-        c = parseFloat(cStr);
-      }
-      
-      let h = 0;
-      if (hStr.toLowerCase() === 'none') {
-        h = 0;
-      } else {
-        h = parseFloat(hStr);
-      }
-      
-      let a: number | undefined = undefined;
-      if (aStr) {
-        if (aStr.endsWith('%')) {
-          a = parseFloat(aStr) / 100;
-        } else {
-          a = parseFloat(aStr);
-        }
-      }
-      
-      return oklchToRgb(l, c, h, a);
+      const fnLower = fnName.toLowerCase();
+      return parseSingleColorCall(fnLower, inner);
     } catch (e) {
       return 'rgb(120, 120, 120)';
     }
   });
 
-  // Convert oklab
-  converted = converted.replace(/oklab\(\s*([0-9.]+%?)\s+([0-9.-]+%?)\s+([0-9.-]+%?)(?:\s*\/\s*([0-9.]+%?))?\s*\)/gi, (match, lStr, aStr, bStr, alphaStr) => {
-    try {
-      let l = 0;
-      if (lStr.endsWith('%')) {
-        l = parseFloat(lStr) / 100;
-      } else {
-        l = parseFloat(lStr);
-      }
-      
-      let aLab = 0;
-      if (aStr.endsWith('%')) {
-        aLab = (parseFloat(aStr) / 100) * 0.4;
-      } else {
-        aLab = parseFloat(aStr);
-      }
-      
-      let bLab = 0;
-      if (bStr.endsWith('%')) {
-        bLab = (parseFloat(bStr) / 100) * 0.4;
-      } else {
-        bLab = parseFloat(bStr);
-      }
-      
-      let alpha: number | undefined = undefined;
-      if (alphaStr) {
-        if (alphaStr.endsWith('%')) {
-          alpha = parseFloat(alphaStr) / 100;
-        } else {
-          alpha = parseFloat(alphaStr);
-        }
-      }
-      
-      // Since oklab is linear LMS transformation, we can convert it using the same LMS formula
-      return oklchToRgb(l, aLab, bLab, alpha); // in our formula, L, a_lab, b_lab are used directly inside the LMS transformation matrix when calling oklchToRgb with direct x/y coords instead of hue angles!
-    } catch (e) {
-      return 'rgb(120, 120, 120)';
-    }
-  });
+  // Catch-all safety for any remaining unconverted oklab/oklch
+  converted = converted.replace(/\b(oklab|oklch)\s*\([^)]*\)/gi, 'rgb(120, 120, 120)');
 
   return converted;
 }
+
+const createHtml2CanvasOptions = () => ({
+  scale: 2, // high quality
+  useCORS: true,
+  logging: false,
+  backgroundColor: '#ffffff',
+  onclone: (clonedDoc: Document) => {
+    const iframeWin = clonedDoc.defaultView || window;
+
+    // 1. Convert all style tags in cloned document
+    const styleElements = clonedDoc.querySelectorAll('style');
+    styleElements.forEach(el => {
+      el.innerHTML = parseAndConvertColors(el.innerHTML);
+    });
+
+    // 2. Traversal: replace computed styles and inline styles containing oklab/oklch/lab/lch
+    const allElements = clonedDoc.querySelectorAll('*');
+    allElements.forEach(node => {
+      const el = node as HTMLElement;
+      if (!el) return;
+
+      if (el.getAttribute) {
+        const styleAttr = el.getAttribute('style');
+        if (styleAttr && (styleAttr.toLowerCase().includes('oklab') || styleAttr.toLowerCase().includes('oklch') || styleAttr.toLowerCase().includes('lab(') || styleAttr.toLowerCase().includes('lch('))) {
+          el.setAttribute('style', parseAndConvertColors(styleAttr));
+        }
+      }
+
+      if (iframeWin && el.style) {
+        try {
+          const comp = iframeWin.getComputedStyle(el);
+          if (comp) {
+            const colorProps = [
+              'color', 'background-color', 'border-top-color', 'border-right-color',
+              'border-bottom-color', 'border-left-color', 'outline-color', 'fill',
+              'stroke', 'box-shadow', 'text-shadow'
+            ];
+            for (const prop of colorProps) {
+              const val = comp.getPropertyValue(prop);
+              if (val && typeof val === 'string' && (val.toLowerCase().includes('oklab') || val.toLowerCase().includes('oklch') || val.toLowerCase().includes('lab(') || val.toLowerCase().includes('lch('))) {
+                el.style.setProperty(prop, parseAndConvertColors(val), 'important');
+              }
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    });
+  }
+});
 
 async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
   const styleElements = Array.from(document.querySelectorAll('style'));
@@ -276,57 +302,8 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
 
   const [isDownloadingPDF, setIsDownloadingPDF] = useState(false);
 
-  const handleDownloadPDF = async () => {
-    setIsDownloadingPDF(true);
-    try {
-      const element = printAreaRef.current;
-      if (!element) {
-        throw new Error("No se encontró el elemento a imprimir.");
-      }
-
-      const canvas = await runWithOklchPolyfill(async () => {
-        return await html2canvas(element, {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff'
-        });
-      });
-
-      const imgData = canvas.toDataURL('image/jpeg', 0.95);
-
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      const imgWidth = 210;
-      const pageHeight = 297;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-
-      const formattedDate = cabecera.fecha ? cabecera.fecha.replace(/-/g, '') : 'TEMP';
-      const fileName = `Reporte_Turno_Polar_${formattedDate}_T${cabecera.turno || 'X'}_Grupo_${cabecera.grupo || 'X'}.pdf`;
-
-      pdf.save(fileName);
-    } catch (err: any) {
-      console.error("Failed to download PDF:", err);
-      alert("Error al descargar el PDF: " + err.message);
-    } finally {
-      setIsDownloadingPDF(false);
-    }
+  const handleDownloadPDF = () => {
+    window.print();
   };
 
   const handleSavePDF = async () => {
@@ -347,12 +324,7 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
 
       // Capture the element using html2canvas
       const canvas = await runWithOklchPolyfill(async () => {
-        return await html2canvas(element, {
-          scale: 2, // high quality
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff'
-        });
+        return await html2canvas(element, createHtml2CanvasOptions());
       });
 
       const imgData = canvas.toDataURL('image/jpeg', 0.95);
@@ -759,20 +731,11 @@ async function runWithOklchPolyfill<T>(fn: () => Promise<T>): Promise<T> {
         <div className="flex flex-wrap gap-2.5 items-center">
           <button
             onClick={handleDownloadPDF}
-            disabled={isDownloadingPDF}
-            className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-950 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md shadow-slate-100 transition-all cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
+            className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-950 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md shadow-slate-100 transition-all cursor-pointer"
+            title="Descargar o guardar como PDF mediante el diálogo de impresión"
           >
-            {isDownloadingPDF ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Generando PDF... 🔄
-              </>
-            ) : (
-              <>
-                <FileText className="w-4 h-4" />
-                Descargar PDF Local 📥
-              </>
-            )}
+            <FileText className="w-4 h-4" />
+            Descargar PDF Local 📥
           </button>
 
           <button
